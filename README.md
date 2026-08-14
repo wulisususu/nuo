@@ -48,25 +48,26 @@ version: 2.0.0-noaccessibility
 
 “创建”替代了 V1 的“续期 30 天”。
 
-当剪贴板识别到 **9 位纯数字**，且正式授权表、库存表都不存在该号码时，“创建”按钮会启用，并调用：
+当剪贴板识别到 **6–12 位纯数字**，且正式授权表、库存表都不存在该号码时，“创建”按钮会启用，并调用：
 
 ```text
-POST /api/test-card-stock/create
+POST /backend/cards
 ```
 
-创建固定为测试服通用卡：
+创建固定为测试服通用正式卡：
 
 ```text
-card_no = 输入的 9 位数字
-card_secret = 同一串 9 位数字
-card_type = long_term
+card_no = 输入的 6–12 位数字
+card_secret = 同一串数字
+status = activated
 game_scope = ALL
 scope = ALL
 duration_kind = PERMANENT
-allocation_mode = LEGACY_ALL
+source_type = DIRECT
+binding_status = unbound
 ```
 
-也就是测试服 ALL 通用、永久库存卡。后台已有相同卡号时不会重复创建。
+也就是测试服 ALL 通用、永久、已激活、未绑定的正式授权卡。后台已有相同卡号/卡密时不会重复创建。
 
 ### 中文状态显示
 
@@ -86,6 +87,8 @@ discarded -> 已废弃
 unbound -> 未绑定
 bound -> 已绑定
 binding -> 绑定中
+replaced -> 已替换
+refunded -> 已退款
 refund_blocked -> 退款锁定
 blocked -> 已锁定
 released -> 已解绑
@@ -106,7 +109,7 @@ app/src/main/java/com/wulisu/licenseoverlay/core/
 ```text
 GET  /backend/cards?q=<code>&limit=20&offset=0
 GET  /api/test-card-stock/list?q=<code>&page=1&page_size=20
-POST /api/test-card-stock/create
+POST /backend/cards
 POST /backend/cards/{id}/activate
 POST /backend/cards/{id}/refund/disable
 POST /backend/cards/{id}/renew
