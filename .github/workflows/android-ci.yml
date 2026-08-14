@@ -25,12 +25,19 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Build debug APK
-        run: gradle --no-daemon :app:assembleDebug
+      - name: Build both debug APKs
+        run: gradle --no-daemon :app:assembleDebug :overlayonly:assembleDebug
 
-      - name: Upload debug APK
+      - name: Upload V4 accessibility APK
         uses: actions/upload-artifact@v4
         with:
-          name: license-overlay-debug-apk
+          name: license-overlay-v4-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload overlay-only V1 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-overlay-no-accessibility-v1-debug-apk
+          path: overlayonly/build/outputs/apk/debug/overlayonly-debug.apk
           if-no-files-found: error
