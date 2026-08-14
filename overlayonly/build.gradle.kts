@@ -10,7 +10,7 @@ fun buildConfigString(value: String): String =
     "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 android {
-    namespace = "com.wulisu.licenseoverlay.overlayonly"
+    namespace = "com.wulisu.licenseoverlay"
     compileSdk = 36
 
     defaultConfig {
@@ -23,6 +23,17 @@ android {
         buildConfigField("String", "DEFAULT_BASE_URL", buildConfigString(injected("ACTIVATION_BASE_URL", "http://124.223.176.99")))
         buildConfigField("String", "DEFAULT_BASIC_USERNAME", buildConfigString(injected("ACTIVATION_BASIC_USER")))
         buildConfigField("String", "DEFAULT_BASIC_PASSWORD", buildConfigString(injected("ACTIVATION_BASIC_PASSWORD")))
+    }
+
+    sourceSets {
+        getByName("main") {
+            java.srcDirs(
+                "src/main/java",
+                "../app/src/main/java/com/wulisu/licenseoverlay/api",
+                "../app/src/main/java/com/wulisu/licenseoverlay/config",
+                "../app/src/main/java/com/wulisu/licenseoverlay/core"
+            )
+        }
     }
 
     buildFeatures { buildConfig = true }
