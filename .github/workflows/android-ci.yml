@@ -35,9 +35,9 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      - name: Upload overlay-only V1 APK
+      - name: Upload overlay-only V2 APK
         uses: actions/upload-artifact@v4
         with:
-          name: license-overlay-no-accessibility-v1-debug-apk
+          name: license-overlay-no-accessibility-v2-debug-apk
           path: overlayonly/build/outputs/apk/debug/overlayonly-debug.apk
           if-no-files-found: error
