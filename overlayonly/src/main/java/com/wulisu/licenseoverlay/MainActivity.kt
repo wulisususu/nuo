@@ -29,7 +29,6 @@ class MainActivity : Activity() {
     private lateinit var basicUsername: EditText
     private lateinit var basicPassword: EditText
     private lateinit var token: EditText
-    private lateinit var renewHours: EditText
     private var startAfterPermission = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -55,8 +54,8 @@ class MainActivity : Activity() {
             setPadding(dp(20), dp(18), dp(20), dp(28))
         }
 
-        root.addView(text("激活助手·悬浮窗版 V1", 24f, true))
-        root.addView(text("无需无障碍。允许“显示在其他应用上层”后，亮屏时悬浮球常驻所有页面；点击“码”只在当前页面读取一次剪贴板，不会切回本应用。", 14f, false).apply {
+        root.addView(text("激活助手·悬浮窗版 V2", 24f, true))
+        root.addView(text("无需无障碍。亮屏时悬浮球常驻所有页面；复制数字后点“码”即可查询。未创建的 9 位数字可以直接创建为测试服通用卡。", 14f, false).apply {
             setPadding(0, dp(8), 0, dp(16))
         })
 
@@ -88,20 +87,21 @@ class MainActivity : Activity() {
         }
         root.addView(token)
 
-        renewHours = input("默认续期小时数（1-998；999=永久）", config.renewHours.toString()).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER
-        }
-        root.addView(renewHours)
-
         root.addView(button("保存配置") {
             config.baseUrl = baseUrl.text.toString()
             config.basicUsername = basicUsername.text.toString()
             basicPasswordStore.save(basicPassword.text.toString())
             tokenStore.save(token.text.toString())
-            config.renewHours = renewHours.text.toString().toIntOrNull()?.coerceIn(1, 999) ?: 720
             Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show()
             renderStatus()
         })
+
+        root.addView(section("V2 创建规则"))
+        root.addView(text(
+            "当剪贴板识别到 9 位纯数字，且服务器中不存在该卡时，“创建”按钮会启用。创建类型固定为测试服通用卡：长期卡、ALL 通用范围、永久有效。已经存在的卡不会重复创建。",
+            13f,
+            false
+        ))
 
         root.addView(section("与 V4 共存"))
         root.addView(text("本版包名为 com.wulisu.licenseoverlay.overlayonly，不会覆盖原 V4。测试本版时，建议先在原 V4 里关闭无障碍服务，避免出现两个“码”悬浮球。", 13f, false))
