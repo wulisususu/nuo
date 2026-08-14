@@ -59,26 +59,28 @@ class LicenseApi(
         return requestId
     }
 
-    fun createGeneralStock(code: String, callback: (requestId: Long, ApiResult<LicenseSnapshot>) -> Unit): Long {
+    fun createGeneralCard(code: String, callback: (requestId: Long, ApiResult<LicenseSnapshot>) -> Unit): Long {
         val requestId = sequence.incrementAndGet()
         executor.execute {
             val result: ApiResult<LicenseSnapshot> = try {
-                if (!code.matches(Regex("\\d{9}"))) {
-                    ApiResult.Failure("测试服通用卡必须是 9 位纯数字")
+                if (!code.matches(Regex("\\d{6,12}"))) {
+                    ApiResult.Failure("测试服通用卡必须是 6–12 位纯数字")
                 } else {
                     val body = JSONObject()
                         .put("card_no", code)
                         .put("card_secret", code)
-                        .put("card_type", "long_term")
+                        .put("status", "activated")
                         .put("game_scope", "ALL")
                         .put("scope", "ALL")
                         .put("duration_kind", "PERMANENT")
-                        .put("allocation_mode", "LEGACY_ALL")
-                        .put("remark", "悬浮窗V2创建")
-                    when (val response = performJson("POST", "/api/test-card-stock/create", body)) {
+                        .put("source_type", "DIRECT")
+                        .put("legacy_compatible", true)
+                        .put("binding_status", "unbound")
+                        .put("note", "悬浮窗V2创建：测试服通用卡")
+                    when (val response = performJson("POST", "/backend/cards", body)) {
                         is ApiResult.Failure -> response
                         is ApiResult.Success -> ApiResult.Success(
-                            snapshotFromStock(response.value, code, "创建成功：测试服通用卡")
+                            snapshotFromBackend(response.value, code, "创建成功：测试服通用永久卡")
                         )
                     }
                 }
