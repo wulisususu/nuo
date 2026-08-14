@@ -17,8 +17,8 @@ android {
         applicationId = "com.wulisu.licenseoverlay.overlayonly"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0-noaccessibility"
+        versionCode = 2
+        versionName = "2.0.0-noaccessibility"
 
         buildConfigField("String", "DEFAULT_BASE_URL", buildConfigString(injected("ACTIVATION_BASE_URL", "http://124.223.176.99")))
         buildConfigField("String", "DEFAULT_BASIC_USERNAME", buildConfigString(injected("ACTIVATION_BASIC_USER")))
