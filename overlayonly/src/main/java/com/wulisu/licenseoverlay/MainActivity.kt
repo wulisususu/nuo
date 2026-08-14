@@ -55,7 +55,7 @@ class MainActivity : Activity() {
         }
 
         root.addView(text("激活助手·悬浮窗版 V2", 24f, true))
-        root.addView(text("无需无障碍。亮屏时悬浮球常驻所有页面；复制数字后点“码”即可查询。未创建的 9 位数字可以直接创建为测试服通用卡。", 14f, false).apply {
+        root.addView(text("无需无障碍。亮屏时悬浮球常驻所有页面；复制数字后点“码”即可查询。未创建的 6–12 位纯数字可以直接创建为测试服通用卡。", 14f, false).apply {
             setPadding(0, dp(8), 0, dp(16))
         })
 
@@ -98,7 +98,7 @@ class MainActivity : Activity() {
 
         root.addView(section("V2 创建规则"))
         root.addView(text(
-            "当剪贴板识别到 9 位纯数字，且服务器中不存在该卡时，“创建”按钮会启用。创建类型固定为测试服通用卡：长期卡、ALL 通用范围、永久有效。已经存在的卡不会重复创建。",
+            "当剪贴板识别到 6–12 位纯数字，且服务器中不存在该卡时，“创建”按钮会启用。创建后直接成为测试服通用正式卡：ALL 通用范围、永久有效、已激活、未绑定。已经存在的卡不会重复创建。",
             13f,
             false
         ))
