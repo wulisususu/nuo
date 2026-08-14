@@ -16,18 +16,14 @@ import android.widget.TextView
 import android.widget.Toast
 import com.wulisu.licenseoverlay.config.BasicPasswordStore
 import com.wulisu.licenseoverlay.config.ConfigStore
-import com.wulisu.licenseoverlay.config.TargetAppRegistry
 import com.wulisu.licenseoverlay.config.TokenStore
 import com.wulisu.licenseoverlay.service.LicenseAccessibilityService
-import com.wulisu.licenseoverlay.service.MainActivityEvents
 
 class MainActivity : Activity() {
     private lateinit var config: ConfigStore
     private lateinit var tokenStore: TokenStore
     private lateinit var basicPasswordStore: BasicPasswordStore
-    private lateinit var registry: TargetAppRegistry
     private lateinit var status: TextView
-    private lateinit var packageList: TextView
     private lateinit var baseUrl: EditText
     private lateinit var basicUsername: EditText
     private lateinit var basicPassword: EditText
@@ -39,24 +35,12 @@ class MainActivity : Activity() {
         config = ConfigStore(this)
         tokenStore = TokenStore(this)
         basicPasswordStore = BasicPasswordStore(this)
-        registry = TargetAppRegistry(this)
         setContentView(buildContent())
     }
 
     override fun onStart() {
         super.onStart()
-        MainActivityEvents.listener = { label, pkg ->
-            runOnUiThread {
-                Toast.makeText(this, "$label 已学习：$pkg", Toast.LENGTH_LONG).show()
-                renderStatus()
-            }
-        }
         renderStatus()
-    }
-
-    override fun onStop() {
-        MainActivityEvents.listener = null
-        super.onStop()
     }
 
     private fun buildContent(): View {
@@ -66,9 +50,11 @@ class MainActivity : Activity() {
         }
 
         root.addView(text("激活助手", 24f, true))
-        root.addView(text("仅在闲鱼 / 千牛及已学习分身前台时显示悬浮球。复制发货话术后点悬浮球即可解析激活码。", 14f, false).apply {
-            setPadding(0, dp(8), 0, dp(16))
-        })
+        root.addView(text(
+            "启用无障碍服务后，只要设备处于亮屏可交互状态，悬浮球会在所有页面显示。点击悬浮球只读取一次剪贴板，不再跳回本应用。",
+            14f,
+            false
+        ).apply { setPadding(0, dp(8), 0, dp(16)) })
 
         status = text("", 14f, false)
         root.addView(status)
@@ -110,22 +96,13 @@ class MainActivity : Activity() {
             renderStatus()
         })
 
-        root.addView(section("目标应用 / 分身"))
-        packageList = text("", 13f, false)
-        root.addView(packageList)
-
-        root.addView(button("学习闲鱼分身") { beginLearning("闲鱼分身") })
-        root.addView(button("学习千牛分身") { beginLearning("千牛分身") })
-        root.addView(text("学习时会记录你接下来切到的第一个外部 App 包名。开始学习后直接切回对应分身即可。", 12f, false))
-
-        root.addView(section("已对接 activation-code-system"))
+        root.addView(section("当前模式"))
         root.addView(text(
-            "查询：GET /backend/cards?q=<激活码>\n" +
-                "激活：POST /backend/cards/{id}/activate\n" +
-                "退款停用：POST /backend/cards/{id}/refund/disable\n" +
-                "续期：POST /backend/cards/{id}/renew\n" +
-                "解绑：POST /backend/cards/{id}/unbind\n" +
-                "网络：支持 HTTP / HTTPS；Basic Auth 优先于 Bearer Token",
+            "• 亮屏：悬浮球始终显示\n" +
+                "• 灭屏：悬浮球自动隐藏\n" +
+                "• 不区分闲鱼 / 千牛 / 微信 / 桌面 / 设置\n" +
+                "• 点悬浮球：当前页面不切换，只读取剪贴板并识别激活码\n" +
+                "• 识别成功后：直接在悬浮面板查询 / 激活 / 停用 / 续期 / 解绑",
             13f,
             false
         ))
@@ -133,18 +110,16 @@ class MainActivity : Activity() {
         return ScrollView(this).apply { addView(root) }
     }
 
-    private fun beginLearning(label: String) {
-        registry.beginLearning(label)
-        Toast.makeText(this, "请切到$label，助手会记录下一个外部 App", Toast.LENGTH_LONG).show()
-        moveTaskToBack(true)
-    }
-
     private fun renderStatus() {
         val serviceEnabled = LicenseAccessibilityService.INSTANCE != null
-        val auth = if (config.basicUsername.isNotBlank() && basicPasswordStore.read().isNotBlank()) "Basic Auth 已配置" else "Basic Auth 未配置"
-        status.text = (if (serviceEnabled) "前台检测：已启用" else "前台检测：未启用") + "\n服务器：${config.baseUrl.ifBlank { "未配置" }}\n$auth"
+        val auth = if (config.basicUsername.isNotBlank() && basicPasswordStore.read().isNotBlank()) {
+            "Basic Auth 已配置"
+        } else {
+            "Basic Auth 未配置"
+        }
+        status.text = (if (serviceEnabled) "后台悬浮服务：已启用" else "后台悬浮服务：未启用") +
+            "\n服务器：${config.baseUrl.ifBlank { "未配置" }}\n$auth"
         status.setTextColor(if (serviceEnabled) 0xFF1B7F3A.toInt() else 0xFFB3261E.toInt())
-        packageList.text = registry.packages().sorted().joinToString(separator = "\n", prefix = "当前白名单：\n")
     }
 
     private fun section(value: String) = text(value, 17f, true).apply {
