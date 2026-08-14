@@ -270,8 +270,8 @@ class OverlayController(private val service: Service) {
     private fun createCurrentCode() {
         val code = currentCode ?: return
         if (!createAllowed) return
-        if (!code.matches(Regex("\\d{9}"))) {
-            setStatus("创建失败：测试服通用卡必须是 9 位纯数字")
+        if (!code.matches(Regex("\\d{6,12}"))) {
+            setStatus("创建失败：测试服通用卡必须是 6–12 位纯数字")
             return
         }
 
@@ -279,12 +279,12 @@ class OverlayController(private val service: Service) {
         createAllowed = false
         setActionAvailability(false, false)
         setStatus("正在创建测试服通用卡…")
-        latestRequestId = api.createGeneralStock(code) { requestId, result -> handler.post {
+        latestRequestId = api.createGeneralCard(code) { requestId, result -> handler.post {
             if (requestId != latestRequestId || currentCode != code) return@post
-            renderResult(result)
-            backendActionable = false
+            backendActionable = result is ApiResult.Success && result.value.source == "backend"
             createAllowed = false
-            setActionAvailability(false, false)
+            renderResult(result)
+            setActionAvailability(backendActionable, false)
         } }
     }
 
@@ -303,12 +303,12 @@ class OverlayController(private val service: Service) {
                 is ApiResult.Failure -> {
                     backendActionable = false
                     if (result.httpCode == 404) {
-                        createAllowed = code.matches(Regex("\\d{9}"))
+                        createAllowed = code.matches(Regex("\\d{6,12}"))
                         setStatus(
                             if (createAllowed) {
-                                "状态：未创建\n绑定：未绑定\n可点击“创建”，将建立测试服通用永久卡"
+                                "状态：未创建\n绑定：未绑定\n可点击“创建”，将建立测试服 ALL 通用永久卡"
                             } else {
-                                "状态：未创建\n绑定：未绑定\n创建测试服通用卡要求 9 位纯数字"
+                                "状态：未创建\n绑定：未绑定\n创建要求 6–12 位纯数字"
                             }
                         )
                     } else {
@@ -357,6 +357,8 @@ class OverlayController(private val service: Service) {
         "unbound" -> "未绑定"
         "bound" -> "已绑定"
         "binding" -> "绑定中"
+        "replaced" -> "已替换"
+        "refunded" -> "已退款"
         "refund_blocked" -> "退款锁定"
         "blocked" -> "已锁定"
         "released" -> "已解绑"
