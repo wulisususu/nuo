@@ -14,6 +14,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import com.wulisu.licenseoverlay.config.BasicPasswordStore
 import com.wulisu.licenseoverlay.config.ConfigStore
 import com.wulisu.licenseoverlay.config.TargetAppRegistry
 import com.wulisu.licenseoverlay.config.TokenStore
@@ -23,10 +24,13 @@ import com.wulisu.licenseoverlay.service.MainActivityEvents
 class MainActivity : Activity() {
     private lateinit var config: ConfigStore
     private lateinit var tokenStore: TokenStore
+    private lateinit var basicPasswordStore: BasicPasswordStore
     private lateinit var registry: TargetAppRegistry
     private lateinit var status: TextView
     private lateinit var packageList: TextView
     private lateinit var baseUrl: EditText
+    private lateinit var basicUsername: EditText
+    private lateinit var basicPassword: EditText
     private lateinit var token: EditText
     private lateinit var renewHours: EditText
 
@@ -34,6 +38,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         config = ConfigStore(this)
         tokenStore = TokenStore(this)
+        basicPasswordStore = BasicPasswordStore(this)
         registry = TargetAppRegistry(this)
         setContentView(buildContent())
     }
@@ -73,10 +78,18 @@ class MainActivity : Activity() {
         })
 
         root.addView(section("服务器"))
-        baseUrl = input("HTTPS 服务器地址", config.baseUrl)
+        baseUrl = input("HTTP / HTTPS 服务器地址", config.baseUrl)
         root.addView(baseUrl)
 
-        token = input("Bearer Token（可空）", tokenStore.read()).apply {
+        basicUsername = input("Basic Auth 用户名（可空）", config.basicUsername)
+        root.addView(basicUsername)
+
+        basicPassword = input("Basic Auth 密码（可空）", basicPasswordStore.read()).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        root.addView(basicPassword)
+
+        token = input("Bearer Token（Basic Auth 未配置时才使用）", tokenStore.read()).apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
         root.addView(token)
@@ -89,6 +102,8 @@ class MainActivity : Activity() {
         root.addView(button("保存配置") {
             val hours = renewHours.text.toString().toIntOrNull()?.coerceIn(1, 999) ?: 720
             config.baseUrl = baseUrl.text.toString()
+            config.basicUsername = basicUsername.text.toString()
+            basicPasswordStore.save(basicPassword.text.toString())
             config.renewHours = hours
             tokenStore.save(token.text.toString())
             Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show()
@@ -109,7 +124,8 @@ class MainActivity : Activity() {
                 "激活：POST /backend/cards/{id}/activate\n" +
                 "退款停用：POST /backend/cards/{id}/refund/disable\n" +
                 "续期：POST /backend/cards/{id}/renew\n" +
-                "解绑：POST /backend/cards/{id}/unbind",
+                "解绑：POST /backend/cards/{id}/unbind\n" +
+                "网络：支持 HTTP / HTTPS；Basic Auth 优先于 Bearer Token",
             13f,
             false
         ))
@@ -125,7 +141,8 @@ class MainActivity : Activity() {
 
     private fun renderStatus() {
         val serviceEnabled = LicenseAccessibilityService.INSTANCE != null
-        status.text = if (serviceEnabled) "前台检测：已启用" else "前台检测：未启用"
+        val auth = if (config.basicUsername.isNotBlank() && basicPasswordStore.read().isNotBlank()) "Basic Auth 已配置" else "Basic Auth 未配置"
+        status.text = (if (serviceEnabled) "前台检测：已启用" else "前台检测：未启用") + "\n服务器：${config.baseUrl.ifBlank { "未配置" }}\n$auth"
         status.setTextColor(if (serviceEnabled) 0xFF1B7F3A.toInt() else 0xFFB3261E.toInt())
         packageList.text = registry.packages().sorted().joinToString(separator = "\n", prefix = "当前白名单：\n")
     }

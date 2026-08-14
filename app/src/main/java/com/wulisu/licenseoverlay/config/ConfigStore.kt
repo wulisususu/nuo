@@ -1,13 +1,18 @@
 package com.wulisu.licenseoverlay.config
 
 import android.content.Context
+import com.wulisu.licenseoverlay.BuildConfig
 
 class ConfigStore(context: Context) {
     private val prefs = context.getSharedPreferences("license_overlay_config", Context.MODE_PRIVATE)
 
     var baseUrl: String
-        get() = prefs.getString("base_url", "")?.trim().orEmpty()
+        get() = prefs.getString("base_url", BuildConfig.DEFAULT_BASE_URL)?.trim()?.trimEnd('/').orEmpty()
         set(value) = prefs.edit().putString("base_url", value.trim().trimEnd('/')).apply()
+
+    var basicUsername: String
+        get() = prefs.getString("basic_username", BuildConfig.DEFAULT_BASIC_USERNAME)?.trim().orEmpty()
+        set(value) = prefs.edit().putString("basic_username", value.trim()).apply()
 
     var renewHours: Int
         get() {

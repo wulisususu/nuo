@@ -1,119 +1,70 @@
 # Android License Overlay Assistant
 
-一个面向自用场景的超轻量 Android 悬浮激活助手。它只在**闲鱼 / 千牛及已学习的应用分身**位于前台时显示悬浮球；用户复制发货话术后点击悬浮球，应用只在这次明确交互中读取一次剪贴板、提取纯数字激活码，并在悬浮层完成服务器操作。
+一个自用的超轻量 Android 悬浮激活助手。仅在**闲鱼 / 千牛及已学习的应用分身**位于前台时显示悬浮球；复制发货话术后点击悬浮球，应用读取一次剪贴板、提取纯数字激活码，并直接调用 `wulisususu/activation-code-system` 的现有后台接口。
 
-> 当前版本：`0.2.0`。已直接适配 `wulisususu/activation-code-system` 当前后台卡密接口。
+> 当前版本：`0.3.0`。
 
 ## 已实现
 
-- 仅监听 `TYPE_WINDOW_STATE_CHANGED`，不读取页面节点，不读取聊天内容。
-- 使用 `TYPE_ACCESSIBILITY_OVERLAY`，无需普通悬浮窗权限。
-- 默认识别闲鱼 `com.taobao.idlefish` 和千牛 `com.taobao.qianniu`。
-- 支持学习 OEM 应用分身实际包名。
-- Android 10+ 剪贴板限制下，通过用户点击后启动透明 `ClipboardBridgeActivity` 获取一次前台焦点并读取剪贴板。
-- 激活码优先按 `激活码 / 卡密 / 授权码` 标签提取，支持纯数字兜底并过滤常见密码/手机号/订单号上下文。
-- 多个候选码时不执行服务器动作。
-- 直接查询 `activation-code-system` 的正式授权和库存码。
-- 服务器 Token 使用 Android Keystore + AES/GCM 保存。
-- 网络层只接受 HTTPS，不关闭证书校验。
+- 只用 Accessibility 窗口事件判断前台 App，`canRetrieveWindowContent=false`，不读取聊天节点。
+- `TYPE_ACCESSIBILITY_OVERLAY` 悬浮球，无需普通悬浮窗权限。
+- 默认闲鱼 `com.taobao.idlefish`、千牛 `com.taobao.qianniu`，支持学习 OEM 应用分身包名。
+- Android 10+ 下仅在用户点击悬浮球后，通过透明 `ClipboardBridgeActivity` 读取一次剪贴板。
+- 激活码本地解析，多候选时禁止自动操作。
+- 直接查询正式授权；未命中时只读查询库存码。
+- 四个动作：激活、退款停用、续期、解绑。
+- 支持 **HTTP / HTTPS**。
+- 支持 **HTTP Basic Auth**；若 Basic Auth 未配置，才回退到 Bearer Token。
+- Basic Auth 密码和 Bearer Token 的用户配置使用 Android Keystore + AES/GCM 保存。
 - 无 Compose、WebView、Room、Retrofit、OkHttp、OCR、ML Kit。
-- Release 开启 R8 与资源压缩。
 
-## 已对接的真实服务器接口
+## 服务器地址与私密构建
 
-客户端不再使用占位的 `/api/license/query` / `/api/license/action`，而是直接复用 `activation-code-system` 当前后台 API。
+公开源码只保存非敏感的默认服务器地址；**Basic Auth 密码不会提交到本仓库**。
 
-| 中文动作 | 服务器接口 | 请求体 |
-| --- | --- | --- |
-| 查询 | `GET /backend/cards?q=<code>&limit=20&offset=0` | - |
-| 激活 | `POST /backend/cards/{id}/activate` | `{}` |
-| 退款停用 | `POST /backend/cards/{id}/refund/disable` | `{}` |
-| 续期 | `POST /backend/cards/{id}/renew` | `{"hours": N}` |
-| 解绑 | `POST /backend/cards/{id}/unbind` | - |
-
-正式授权查询不到时，客户端会额外只读查询：
+构建时可以通过 Gradle property 或环境变量注入：
 
 ```text
-GET /api/test-card-stock/list?q=<code>&page=1&page_size=20
+ACTIVATION_BASE_URL
+ACTIVATION_BASIC_USER
+ACTIVATION_BASIC_PASSWORD
 ```
 
-如果命中库存码，悬浮窗会显示库存状态，但四个正式授权动作保持禁用。
+例如私有 CI 可以在不修改 Kotlin 源码的情况下生成已预配置 APK。若没有注入，首次启动仍可在配置页手工填写。
 
-完整适配说明见 [`docs/SERVER_CONTRACT.md`](docs/SERVER_CONTRACT.md)。
+## 当前真实接口映射
 
-## 续期规则
+| 功能 | 接口 |
+| --- | --- |
+| 查询正式授权 | `GET /backend/cards?q=<code>&limit=20&offset=0` |
+| 查询库存码 | `GET /api/test-card-stock/list?q=<code>&page=1&page_size=20` |
+| 激活 | `POST /backend/cards/{id}/activate` |
+| 退款停用 | `POST /backend/cards/{id}/refund/disable` |
+| 续期 | `POST /backend/cards/{id}/renew` |
+| 解绑 | `POST /backend/cards/{id}/unbind` |
 
-这里严格跟随现有 `activation-code-system`，不自行发明时间规则：
+列表查询返回后，客户端仍会再次精确检查 `card_secret == code || card_no == code`，不会直接使用模糊搜索第一条结果。
 
-- 只有**已过期且仍保留当前设备绑定**的卡可以续期；
-- `1..998` 表示续期小时数；
-- `999` 表示转成永久授权；
-- APK 默认是 `720` 小时，即 30 天；
-- 为避免服务端把 `>=999` 都解释为永久，APK 不允许配置大于 999 的数值。
+### 续期
 
-## 使用流程
+严格跟随当前后端规则：
 
-1. 安装 APK，首次打开“激活助手”。
-2. 配置激活码系统的 HTTPS Base URL、Bearer Token（可空）、默认续期小时数。
-3. 打开系统无障碍设置，启用“激活助手前台检测”。
-4. 在闲鱼或千牛里发送发货话术并复制整段消息。
-5. 点击右侧“码”悬浮球。
-6. 自动提取激活码，并精确查询服务器正式授权；未命中时再查库存。
-7. 正式授权卡可直接执行：激活 / 退款停用 / 续期 / 解绑。
-8. 切到其他 App 后悬浮层自动隐藏。
+- `1..998`：有限小时数；
+- `999`：永久；
+- 默认 `720` 小时（30 天）；
+- 只有后端允许的状态才能续期。
 
-### 应用分身
+## 使用
 
-不同 OEM 的分身实现不同：有的保留原 packageName，有的暴露新的包名。主界面提供“学习闲鱼分身 / 学习千牛分身”：点击后切到对应分身，AccessibilityService 会记录下一个外部 App 的 packageName 并加入白名单。
-
-## 架构
-
-```text
-LicenseAccessibilityService
-  ├─ TargetAppRegistry      # 闲鱼/千牛/分身白名单
-  └─ OverlayController
-       ├─ ClipboardBridge   # 用户点击后一次性读取剪贴板
-       ├─ ActivationCodeParser
-       └─ LicenseApi
-            ├─ resolve backend card by exact code
-            ├─ fallback read-only stock lookup
-            └─ activation-code-system adapter
-                 ├─ activate
-                 ├─ refund/disable
-                 ├─ renew(hours)
-                 └─ unbind
-```
-
-## 为什么需要透明 ClipboardBridgeActivity
-
-Android 10（API 29）起，非默认输入法且当前没有焦点的应用不能访问剪贴板。因此本项目**不后台监听剪贴板**。用户点击悬浮球后，透明 Activity 瞬时获取前台焦点、读取一次剪贴板并立刻 `finish()`，然后结果返回悬浮层。
-
-官方文档：
-
-- Android 10 clipboard privacy: <https://developer.android.com/about/versions/10/privacy/changes>
-- AccessibilityService: <https://developer.android.com/guide/topics/ui/accessibility/service>
-- AccessibilityEvent: <https://developer.android.com/reference/android/view/accessibility/AccessibilityEvent>
-
-## 权限
-
-Manifest 只声明：
-
-```text
-android.permission.INTERNET
-android.permission.BIND_ACCESSIBILITY_SERVICE（系统绑定权限）
-```
-
-Accessibility 配置明确：
-
-```text
-canRetrieveWindowContent = false
-```
-
-即前台门禁只看窗口事件携带的 packageName，不遍历页面节点。
+1. 安装 APK。
+2. 首次打开并启用“激活助手前台检测”无障碍服务。
+3. 在闲鱼 / 千牛发送发货内容并复制整段文字。
+4. 点击悬浮球“码”。
+5. 自动识别激活码并查询状态。
+6. 在悬浮面板执行激活 / 退款停用 / 续期 / 解绑。
+7. 切到其他 App 后悬浮层自动隐藏。
 
 ## 构建
-
-当前工程版本：
 
 ```text
 compileSdk 36
@@ -125,41 +76,26 @@ Gradle 8.13
 JDK 17
 ```
 
-仓库 CI 使用 `gradle/actions/setup-gradle` 提供 Gradle 8.13，并在构建成功后上传 `app-debug.apk` Artifact。
-
-本地已有 Gradle 8.13 时：
+GitHub Actions 会执行：
 
 ```bash
-gradle :app:assembleDebug
+gradle --no-daemon :app:assembleDebug
 ```
 
-如需标准 Gradle Wrapper：
-
-```bash
-gradle wrapper --gradle-version 8.13
-./gradlew :app:assembleDebug
-```
-
-APK：
+并上传：
 
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## 核心烟雾测试
-
-纯 Kotlin 的激活码解析和四动作定义可以脱离 Android SDK 测试。`scripts/CoreSmokeTest.kt` 同时校验 `renewHours` 的 `1..999` 约束。
-
-## 当前边界
+## 安全边界
 
 - 不 OCR、不截图、不录屏。
-- 不自动读取闲鱼/千牛聊天页面。
+- 不读取闲鱼/千牛聊天节点。
 - 不后台监听剪贴板。
-- 不自动发消息或点击闲鱼/千牛界面。
-- 不上传剪贴板全文，只把解析后的激活码用于配置服务器的精确查询。
-- 不改变 `activation-code-system` 现有业务状态机；APK 只是轻量管理入口。
-- 分身的剪贴板是否跨 Profile 可见取决于 OEM；必须在实际手机上验证。
+- 不自动发消息或点击闲鱼/千牛 UI。
+- 剪贴板全文不落盘、不上传。
+- Basic Auth 密码不应提交到公开源码或公开 CI 配置。
+- 当前因服务器使用普通 HTTP，Manifest 允许 cleartext；迁移 HTTPS 后应重新收紧。
 
-## 目录
-
-源码集中在 `app/src/main/java/com/wulisu/licenseoverlay/`，真实服务器适配见 `docs/SERVER_CONTRACT.md`，后续智能体约束见 `AGENTS.md`。
+后续智能体约束见 [`AGENTS.md`](AGENTS.md)，服务器适配说明见 [`docs/SERVER_CONTRACT.md`](docs/SERVER_CONTRACT.md)。

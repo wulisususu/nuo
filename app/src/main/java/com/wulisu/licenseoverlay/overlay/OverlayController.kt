@@ -17,6 +17,7 @@ import com.wulisu.licenseoverlay.api.ApiResult
 import com.wulisu.licenseoverlay.api.LicenseApi
 import com.wulisu.licenseoverlay.api.LicenseSnapshot
 import com.wulisu.licenseoverlay.clipboard.ClipboardBridge
+import com.wulisu.licenseoverlay.config.BasicPasswordStore
 import com.wulisu.licenseoverlay.config.ConfigStore
 import com.wulisu.licenseoverlay.config.TokenStore
 import com.wulisu.licenseoverlay.core.*
@@ -26,7 +27,13 @@ class OverlayController(private val service: AccessibilityService) {
     private val handler = Handler(Looper.getMainLooper())
     private val config = ConfigStore(service)
     private val tokenStore = TokenStore(service)
-    private val api = LicenseApi({ config.baseUrl }, { tokenStore.read() })
+    private val basicPasswordStore = BasicPasswordStore(service)
+    private val api = LicenseApi(
+        { config.baseUrl },
+        { tokenStore.read() },
+        { config.basicUsername },
+        { basicPasswordStore.read() }
+    )
     private var bubble: TextView? = null
     private var panel: LinearLayout? = null
     private var targetActive = false

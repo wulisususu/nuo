@@ -1,20 +1,23 @@
 package com.wulisu.licenseoverlay.api
 
+import android.util.Base64
 import com.wulisu.licenseoverlay.core.LicenseAction
 import com.wulisu.licenseoverlay.core.LicenseCommand
 import com.wulisu.licenseoverlay.core.ServerContract
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.HttpURLConnection
 import java.net.URLEncoder
 import java.net.URL
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
-import javax.net.ssl.HttpsURLConnection
 
 class LicenseApi(
     private val baseUrlProvider: () -> String,
-    private val tokenProvider: () -> String
+    private val tokenProvider: () -> String,
+    private val basicUsernameProvider: () -> String = { "" },
+    private val basicPasswordProvider: () -> String = { "" }
 ) {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private val sequence = AtomicLong(0)
@@ -82,9 +85,7 @@ class LicenseApi(
                 val exact = findExact(response.value.optJSONArray("items") ?: JSONArray(), code)
                 when {
                     exact.size > 1 -> ApiResult.Failure("找到多个完全相同的库存记录，请到后台检查重复数据")
-                    exact.size == 1 -> ApiResult.Success(
-                        ResolvedCode.Stock(snapshotFromStock(exact.first(), code))
-                    )
+                    exact.size == 1 -> ApiResult.Success(ResolvedCode.Stock(snapshotFromStock(exact.first(), code)))
                     else -> ApiResult.Failure("未找到激活码 $code", 404)
                 }
             }
@@ -151,20 +152,35 @@ class LicenseApi(
 
     private fun performJson(method: String, path: String, body: JSONObject?): ApiResult<JSONObject> {
         val baseUrl = baseUrlProvider().trim().trimEnd('/')
-        if (!baseUrl.startsWith("https://", ignoreCase = true)) return ApiResult.Failure("请先配置 HTTPS 服务器地址")
-        val connection = (URL(baseUrl + path).openConnection() as HttpsURLConnection).apply {
+        if (!baseUrl.startsWith("http://", ignoreCase = true) && !baseUrl.startsWith("https://", ignoreCase = true)) {
+            return ApiResult.Failure("请先配置 HTTP 或 HTTPS 服务器地址")
+        }
+
+        val connection = (URL(baseUrl + path).openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 5_000
             readTimeout = 8_000
             setRequestProperty("Accept", "application/json")
-            tokenProvider().trim().takeIf { it.isNotEmpty() }?.let {
-                setRequestProperty("Authorization", "Bearer $it")
+            setRequestProperty("Cache-Control", "no-cache")
+
+            val basicUser = basicUsernameProvider().trim()
+            val basicPassword = basicPasswordProvider()
+            if (basicUser.isNotEmpty() && basicPassword.isNotEmpty()) {
+                val raw = "$basicUser:$basicPassword".toByteArray(Charsets.UTF_8)
+                val encoded = Base64.encodeToString(raw, Base64.NO_WRAP)
+                setRequestProperty("Authorization", "Basic $encoded")
+            } else {
+                tokenProvider().trim().takeIf { it.isNotEmpty() }?.let {
+                    setRequestProperty("Authorization", "Bearer $it")
+                }
             }
+
             if (body != null) {
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
             }
         }
+
         try {
             if (body != null) {
                 connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
@@ -173,7 +189,8 @@ class LicenseApi(
             val stream = if (httpCode in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
             if (httpCode !in 200..299) {
-                return ApiResult.Failure(extractMessage(text).ifBlank { "HTTP $httpCode" }, httpCode)
+                val fallback = if (httpCode == 401) "Basic Auth 认证失败" else "HTTP $httpCode"
+                return ApiResult.Failure(extractMessage(text).ifBlank { fallback }, httpCode)
             }
             if (text.isBlank()) return ApiResult.Success(JSONObject())
             return runCatching { ApiResult.Success(JSONObject(text)) }

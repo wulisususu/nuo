@@ -3,6 +3,12 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+fun injected(name: String, fallback: String = ""): String =
+    providers.gradleProperty(name).orNull ?: System.getenv(name) ?: fallback
+
+fun buildConfigString(value: String): String =
+    "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
 android {
     namespace = "com.wulisu.licenseoverlay"
     compileSdk = 36
@@ -11,8 +17,16 @@ android {
         applicationId = "com.wulisu.licenseoverlay"
         minSdk = 29
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
+
+        buildConfigField("String", "DEFAULT_BASE_URL", buildConfigString(injected("ACTIVATION_BASE_URL", "http://124.223.176.99")))
+        buildConfigField("String", "DEFAULT_BASIC_USERNAME", buildConfigString(injected("ACTIVATION_BASIC_USER")))
+        buildConfigField("String", "DEFAULT_BASIC_PASSWORD", buildConfigString(injected("ACTIVATION_BASIC_PASSWORD")))
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {
