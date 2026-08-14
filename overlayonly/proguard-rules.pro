@@ -1,0 +1,2 @@
+-dontwarn org.json.**
+-keepattributes *Annotation*
