@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">激活助手</string>
+    <string name="accessibility_service_name">激活助手前台检测</string>
+    <string name="accessibility_service_description">仅根据窗口事件识别闲鱼、千牛及已学习的分身，不读取页面内容。</string>
+</resources>
