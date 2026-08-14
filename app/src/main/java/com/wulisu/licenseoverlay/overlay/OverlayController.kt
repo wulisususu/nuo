@@ -31,6 +31,7 @@ class OverlayController(private val service: AccessibilityService) {
     private var panel: LinearLayout? = null
     private var targetActive = false
     private var currentCode: String? = null
+    private var currentActionable = false
     private var latestRequestId = 0L
     private var confirmAction: LicenseAction? = null
     private var confirmUntil = 0L
@@ -72,6 +73,7 @@ class OverlayController(private val service: AccessibilityService) {
     private fun readClipboard() {
         ClipboardBridge.request(service) { text -> handler.post {
             if (!targetActive) return@post
+            currentActionable = false
             when (val result = ActivationCodeParser.parse(text.orEmpty())) {
                 is ParseResult.Found -> { currentCode = result.code; openPanel("已识别，正在查询…"); queryCurrent() }
                 is ParseResult.Ambiguous -> { currentCode = null; openPanel("检测到多个疑似激活码：${result.codes.joinToString(" / ")}") }
@@ -88,21 +90,31 @@ class OverlayController(private val service: AccessibilityService) {
         val close = Button(service).apply { text = "×"; textSize = 18f; minWidth = 0; minimumWidth = 0; setPadding(0,0,0,0); setOnClickListener { collapse() } }
         titleRow.addView(title); titleRow.addView(close, LinearLayout.LayoutParams(dp(44), dp(36))); root.addView(titleRow)
         root.addView(label(currentCode ?: "—", 20f, true), LinearLayout.LayoutParams(-1, dp(42)))
-        root.addView(label(initialMessage, 13f, false).apply { tag = TAG_STATUS }, LinearLayout.LayoutParams(-1, dp(48)))
+        root.addView(label(initialMessage, 13f, false).apply { tag = TAG_STATUS }, LinearLayout.LayoutParams(-1, dp(64)))
         val row1 = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL }
         row1.addView(actionButton("激活", LicenseAction.ACTIVATE), weightedButtonParams()); row1.addView(actionButton("退款停用", LicenseAction.REFUND_DISABLE), weightedButtonParams()); root.addView(row1)
         val row2 = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL }
-        row2.addView(actionButton("续期 ${config.renewDays} 天", LicenseAction.RENEW), weightedButtonParams()); row2.addView(actionButton("解绑", LicenseAction.UNBIND), weightedButtonParams()); root.addView(row2)
+        row2.addView(actionButton(renewButtonLabel(), LicenseAction.RENEW), weightedButtonParams()); row2.addView(actionButton("解绑", LicenseAction.UNBIND), weightedButtonParams()); root.addView(row2)
         root.addView(Button(service).apply { text = "重新读取剪贴板"; isAllCaps = false; setOnClickListener { readClipboard() } }, LinearLayout.LayoutParams(-1, dp(42)))
-        val params = WindowManager.LayoutParams(dp(270), WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+        val params = WindowManager.LayoutParams(dp(285), WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.CENTER_VERTICAL or Gravity.END; x = dp(8) }
-        wm.addView(root, params); panel = root; setButtonsEnabled(currentCode != null)
+        wm.addView(root, params); panel = root; setButtonsEnabled(false)
+    }
+
+    private fun renewButtonLabel(): String {
+        val hours = config.renewHours
+        return when {
+            hours == 999 -> "续期 永久"
+            hours % 24 == 0 -> "续期 ${hours / 24} 天"
+            else -> "续期 $hours 小时"
+        }
     }
 
     private fun actionButton(text: String, action: LicenseAction): Button = Button(service).apply { this.text = text; isAllCaps = false; tag = action; setOnClickListener { onAction(action, this) } }
 
     private fun onAction(action: LicenseAction, button: Button) {
         val code = currentCode ?: return
+        if (!currentActionable) return
         val now = System.currentTimeMillis()
         if (action.destructive && (confirmAction != action || now > confirmUntil)) {
             confirmAction = action; confirmUntil = now + 3_000
@@ -111,11 +123,12 @@ class OverlayController(private val service: AccessibilityService) {
             return
         }
         confirmAction = null
-        val command = if (action == LicenseAction.RENEW) LicenseCommand(code, action, config.renewDays) else LicenseCommand(code, action)
+        val command = if (action == LicenseAction.RENEW) LicenseCommand(code, action, config.renewHours) else LicenseCommand(code, action)
         setButtonsEnabled(false); setStatus("处理中…")
         latestRequestId = api.execute(command) { requestId, result -> handler.post {
             if (requestId != latestRequestId || currentCode != code) return@post
-            renderResult(result); setButtonsEnabled(true)
+            if (result is ApiResult.Success) currentActionable = result.value.source == "backend"
+            renderResult(result); setButtonsEnabled(currentActionable)
         } }
     }
 
@@ -124,13 +137,24 @@ class OverlayController(private val service: AccessibilityService) {
         setButtonsEnabled(false)
         latestRequestId = api.query(code) { requestId, result -> handler.post {
             if (requestId != latestRequestId || currentCode != code) return@post
-            renderResult(result); setButtonsEnabled(true)
+            currentActionable = result is ApiResult.Success && result.value.source == "backend"
+            renderResult(result)
+            setButtonsEnabled(currentActionable)
         } }
     }
 
     private fun renderResult(result: ApiResult<LicenseSnapshot>) {
         when (result) {
-            is ApiResult.Success -> { val s = result.value; val parts = mutableListOf("状态：${s.status}"); s.expiresAt?.let { parts += "到期：$it" }; if (s.message.isNotBlank()) parts += s.message; setStatus(parts.joinToString("\n")) }
+            is ApiResult.Success -> {
+                val s = result.value
+                val parts = mutableListOf<String>()
+                parts += if (s.source == "stock") "类型：库存码" else "类型：正式授权"
+                parts += "状态：${s.status}"
+                s.bindingStatus?.let { parts += "绑定：$it" }
+                s.expiresAt?.let { parts += "到期：$it" }
+                if (s.message.isNotBlank()) parts += s.message
+                setStatus(parts.joinToString("\n"))
+            }
             is ApiResult.Failure -> setStatus("失败：${result.message}")
         }
     }
@@ -138,7 +162,7 @@ class OverlayController(private val service: AccessibilityService) {
     private fun setStatus(text: String) { panel?.findViewWithTag<TextView>(TAG_STATUS)?.text = text }
     private fun setButtonsEnabled(enabled: Boolean) { LicenseAction.entries.forEach { panel?.findViewWithTag<Button>(it)?.isEnabled = enabled } }
     private fun collapse() { removePanel(); if (targetActive) showBubble() }
-    private fun hideAll() { removePanel(); removeBubble(); currentCode = null; latestRequestId = -1L }
+    private fun hideAll() { removePanel(); removeBubble(); currentCode = null; currentActionable = false; latestRequestId = -1L }
     private fun removeBubble() { bubble?.let { runCatching { wm.removeView(it) } }; bubble = null }
     private fun removePanel() { panel?.let { runCatching { wm.removeView(it) } }; panel = null }
     private fun label(text: String, size: Float, bold: Boolean) = TextView(service).apply { this.text = text; textSize = size; setTextColor(Color.WHITE); gravity = Gravity.CENTER_VERTICAL; if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD) }

@@ -1,60 +1,109 @@
-# Server Contract v1
+# Server Contract v2 — activation-code-system adapter
 
-本文件是 Android 客户端与后续服务器智能体之间的稳定边界。服务器可以在内部映射到已有接口，但不要修改 Android UI 层来适配服务器。
+本客户端已经直接适配 `wulisususu/activation-code-system` 当前 `main` 的后台卡密 API，不再要求服务器实现 `/api/license/query` 或 `/api/license/action`。
 
 ## Base URL
 
 用户配置 HTTPS Base URL。客户端拒绝明文 HTTP。
 
-## Authentication
+若配置 Token，会附带：
 
-若配置 Token：`Authorization: Bearer <token>`。
-
-## 查询
-
-`POST /api/license/query`
-
-```json
-{"code":"42531563"}
+```http
+Authorization: Bearer <token>
 ```
 
-## 统一动作
+当前 `activation-code-system` 后台卡密路由本身未强制读取该 Header；可由 Nginx / API Gateway 在外层校验。
 
-`POST /api/license/action`
+## 1. 按激活码解析正式授权
 
-激活：
-```json
-{"code":"42531563","action":"activate"}
+```http
+GET /backend/cards?q=<urlencoded-code>&limit=20&offset=0
 ```
 
-退款停用：
-```json
-{"code":"42531563","action":"refund_disable"}
+客户端只接受 `card_secret == code` 或 `card_no == code` 的**完全匹配**，不会直接使用模糊搜索结果。
+
+若正式授权未命中，再只读查询库存：
+
+```http
+GET /api/test-card-stock/list?q=<urlencoded-code>&page=1&page_size=20
 ```
 
-续期：
-```json
-{"code":"42531563","action":"renew","days":30}
+库存码只展示状态，不允许执行正式授权动作。
+
+## 2. 四个动作
+
+先由查询得到 `card_id`，再复用现有后台接口。
+
+### 激活
+
+```http
+POST /backend/cards/{card_id}/activate
+Content-Type: application/json
+
+{}
 ```
 
-解绑：
-```json
-{"code":"42531563","action":"unbind"}
+### 退款停用
+
+```http
+POST /backend/cards/{card_id}/refund/disable
+Content-Type: application/json
+
+{}
 ```
 
-推荐返回：
-```json
-{"success":true,"message":"操作成功","data":{"code":"42531563","status":"active","expiresAt":"2026-10-14T00:00:00+08:00"}}
+该动作会使用现有 `disable_card_for_refund` 业务规则，停用卡并锁定当前绑定设备。
+
+### 续期
+
+```http
+POST /backend/cards/{card_id}/renew
+Content-Type: application/json
+
+{"hours":720}
 ```
 
-客户端兼容 `success/ok`、`message/msg`、`status/state`、`expiresAt/expire_at/expires_at`。
+现有服务端规则：
 
-## 业务语义
+- 只允许“已过期且仍持有当前绑定”的卡续期；
+- `1..998` 表示有限小时数；
+- `999` 表示转为永久授权；
+- 服务端实现对 `hours >= 999` 都按永久处理，因此客户端强制限制为 `1..999`，防止误传更大的有限时长。
 
-- `refund_disable`：因退款停用，服务端应保留该原因，区别于自然过期等状态。
-- `renew`：`days` 为 1..3650；服务器接入时必须明确从当前到期时间还是当前时间续。
-- `unbind`：解除设备/HWID 绑定，不删除激活码。
+### 解绑
 
-## 幂等
+```http
+POST /backend/cards/{card_id}/unbind
+```
 
-`activate`、`refund_disable`、`unbind` 建议幂等。`renew` 不是天然幂等，服务器应增加 requestId/幂等键。Android V1 不自动重试写操作。
+解绑只结束当前机器绑定，不删除卡。
+
+## 3. 返回格式
+
+`/backend/cards` 和动作接口都使用 `BackendCardOut`。客户端读取：
+
+```text
+id
+card_no
+card_secret
+status
+expires_at
+binding_status
+machine_code
+```
+
+库存查询读取：
+
+```text
+card_no
+card_secret
+status
+```
+
+## 4. 安全与并发
+
+- 客户端只把解析后的纯数字激活码放进查询 URL，不上传整段剪贴板。
+- 写操作前会再次按激活码解析当前 `card_id`，不缓存长期 ID 映射。
+- 退款停用与解绑在悬浮 UI 保留二次确认。
+- 客户端不自动重试写操作，尤其是续期。
+- `latestRequestId` 防止旧查询覆盖用户刚复制的新激活码。

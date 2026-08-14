@@ -28,7 +28,7 @@ class MainActivity : Activity() {
     private lateinit var packageList: TextView
     private lateinit var baseUrl: EditText
     private lateinit var token: EditText
-    private lateinit var renewDays: EditText
+    private lateinit var renewHours: EditText
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,15 +81,15 @@ class MainActivity : Activity() {
         }
         root.addView(token)
 
-        renewDays = input("默认续期天数", config.renewDays.toString()).apply {
+        renewHours = input("默认续期小时数（1-998；999=永久）", config.renewHours.toString()).apply {
             inputType = InputType.TYPE_CLASS_NUMBER
         }
-        root.addView(renewDays)
+        root.addView(renewHours)
 
         root.addView(button("保存配置") {
-            val days = renewDays.text.toString().toIntOrNull()?.coerceIn(1, 3650) ?: 30
+            val hours = renewHours.text.toString().toIntOrNull()?.coerceIn(1, 999) ?: 720
             config.baseUrl = baseUrl.text.toString()
-            config.renewDays = days
+            config.renewHours = hours
             tokenStore.save(token.text.toString())
             Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show()
             renderStatus()
@@ -103,8 +103,16 @@ class MainActivity : Activity() {
         root.addView(button("学习千牛分身") { beginLearning("千牛分身") })
         root.addView(text("学习时会记录你接下来切到的第一个外部 App 包名。开始学习后直接切回对应分身即可。", 12f, false))
 
-        root.addView(section("服务器动作协议"))
-        root.addView(text("activate · refund_disable · renew(days) · unbind\n查询接口：/api/license/query\n动作接口：/api/license/action", 13f, false))
+        root.addView(section("已对接 activation-code-system"))
+        root.addView(text(
+            "查询：GET /backend/cards?q=<激活码>\n" +
+                "激活：POST /backend/cards/{id}/activate\n" +
+                "退款停用：POST /backend/cards/{id}/refund/disable\n" +
+                "续期：POST /backend/cards/{id}/renew\n" +
+                "解绑：POST /backend/cards/{id}/unbind",
+            13f,
+            false
+        ))
 
         return ScrollView(this).apply { addView(root) }
     }

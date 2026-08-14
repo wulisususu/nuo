@@ -7,8 +7,10 @@ fun main() {
     check(ActivationCodeParser.parse("激活码：11111111\n激活码：22222222") is ParseResult.Ambiguous)
     check(LicenseCommand("42531563", LicenseAction.ACTIVATE).action.wireName == "activate")
     check(LicenseCommand("42531563", LicenseAction.REFUND_DISABLE).action.wireName == "refund_disable")
-    check(LicenseCommand("42531563", LicenseAction.RENEW, 30).days == 30)
+    check(LicenseCommand("42531563", LicenseAction.RENEW, 720).renewHours == 720)
+    check(LicenseCommand("42531563", LicenseAction.RENEW, 999).renewHours == 999)
     check(LicenseCommand("42531563", LicenseAction.UNBIND).action.wireName == "unbind")
     check(runCatching { LicenseCommand("42531563", LicenseAction.RENEW) }.isFailure)
+    check(runCatching { LicenseCommand("42531563", LicenseAction.RENEW, 1000) }.isFailure)
     println("core smoke tests passed")
 }
