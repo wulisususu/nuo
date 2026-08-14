@@ -59,6 +59,37 @@ class LicenseApi(
         return requestId
     }
 
+    fun createGeneralStock(code: String, callback: (requestId: Long, ApiResult<LicenseSnapshot>) -> Unit): Long {
+        val requestId = sequence.incrementAndGet()
+        executor.execute {
+            val result: ApiResult<LicenseSnapshot> = try {
+                if (!code.matches(Regex("\\d{9}"))) {
+                    ApiResult.Failure("测试服通用卡必须是 9 位纯数字")
+                } else {
+                    val body = JSONObject()
+                        .put("card_no", code)
+                        .put("card_secret", code)
+                        .put("card_type", "long_term")
+                        .put("game_scope", "ALL")
+                        .put("scope", "ALL")
+                        .put("duration_kind", "PERMANENT")
+                        .put("allocation_mode", "LEGACY_ALL")
+                        .put("remark", "悬浮窗V2创建")
+                    when (val response = performJson("POST", "/api/test-card-stock/create", body)) {
+                        is ApiResult.Failure -> response
+                        is ApiResult.Success -> ApiResult.Success(
+                            snapshotFromStock(response.value, code, "创建成功：测试服通用卡")
+                        )
+                    }
+                }
+            } catch (t: Throwable) {
+                ApiResult.Failure(t.message ?: "network error")
+            }
+            callback(requestId, result)
+        }
+        return requestId
+    }
+
     fun close() = executor.shutdownNow()
 
     private fun resolveCode(code: String): ApiResult<ResolvedCode> {
@@ -138,7 +169,11 @@ class LicenseApi(
         )
     }
 
-    private fun snapshotFromStock(json: JSONObject, fallbackCode: String): LicenseSnapshot {
+    private fun snapshotFromStock(
+        json: JSONObject,
+        fallbackCode: String,
+        message: String = "库存码，尚未转换为正式授权"
+    ): LicenseSnapshot {
         val resolvedCode = json.optString("card_secret").takeIf { it.isNotBlank() }
             ?: json.optString("card_no").takeIf { it.isNotBlank() }
             ?: fallbackCode
@@ -146,7 +181,7 @@ class LicenseApi(
             code = resolvedCode,
             status = json.optString("status", "unknown"),
             source = "stock",
-            message = "库存码，尚未转换为正式授权"
+            message = message
         )
     }
 
