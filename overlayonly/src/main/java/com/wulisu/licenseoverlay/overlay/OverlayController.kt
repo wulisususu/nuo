@@ -47,7 +47,8 @@ class OverlayController(private val service: Service) {
     private var screenActive = false
     private var clipboardReading = false
     private var currentCode: String? = null
-    private var currentActionable = false
+    private var backendActionable = false
+    private var createAllowed = false
     private var latestRequestId = 0L
     private var confirmAction: LicenseAction? = null
     private var confirmUntil = 0L
@@ -156,12 +157,14 @@ class OverlayController(private val service: Service) {
         if (!screenActive) return
         if (text.isNullOrBlank()) {
             currentCode = null
-            currentActionable = false
+            backendActionable = false
+            createAllowed = false
             openPanel("未读取到剪贴板。请先复制内容后再点“码”。")
             return
         }
 
-        currentActionable = false
+        backendActionable = false
+        createAllowed = false
         when (val result = ActivationCodeParser.parse(text)) {
             is ParseResult.Found -> {
                 currentCode = result.code
@@ -189,14 +192,14 @@ class OverlayController(private val service: Service) {
             background = rounded(0xEE1E1E1E.toInt(), dp(16).toFloat())
         }
         val titleRow = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL }
-        titleRow.addView(label("激活助手·悬浮窗版", 16f, true), LinearLayout.LayoutParams(0, dp(36), 1f))
+        titleRow.addView(label("激活助手·悬浮窗 V2", 16f, true), LinearLayout.LayoutParams(0, dp(36), 1f))
         titleRow.addView(Button(service).apply {
             text = "×"; textSize = 18f; minWidth = 0; minimumWidth = 0; setPadding(0,0,0,0)
             setOnClickListener { collapse() }
         }, LinearLayout.LayoutParams(dp(44), dp(36)))
         root.addView(titleRow)
         root.addView(label(currentCode ?: "—", 20f, true), LinearLayout.LayoutParams(-1, dp(42)))
-        root.addView(label(initialMessage, 13f, false).apply { tag = TAG_STATUS }, LinearLayout.LayoutParams(-1, dp(72)))
+        root.addView(label(initialMessage, 13f, false).apply { tag = TAG_STATUS }, LinearLayout.LayoutParams(-1, dp(88)))
 
         val row1 = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL }
         row1.addView(actionButton("激活", LicenseAction.ACTIVATE), weightedButtonParams())
@@ -204,7 +207,7 @@ class OverlayController(private val service: Service) {
         root.addView(row1)
 
         val row2 = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL }
-        row2.addView(actionButton(renewButtonLabel(), LicenseAction.RENEW), weightedButtonParams())
+        row2.addView(createButton(), weightedButtonParams())
         row2.addView(actionButton("解绑", LicenseAction.UNBIND), weightedButtonParams())
         root.addView(row2)
 
@@ -220,25 +223,23 @@ class OverlayController(private val service: Service) {
         wm.addView(root, params)
         panel = root
         panelParams = params
-        setButtonsEnabled(false)
-    }
-
-    private fun renewButtonLabel(): String {
-        val hours = config.renewHours
-        return when {
-            hours == 999 -> "续期 永久"
-            hours % 24 == 0 -> "续期 ${hours / 24} 天"
-            else -> "续期 $hours 小时"
-        }
+        setActionAvailability(false, false)
     }
 
     private fun actionButton(text: String, action: LicenseAction) = Button(service).apply {
         this.text = text; isAllCaps = false; tag = action; setOnClickListener { onAction(action, this) }
     }
 
+    private fun createButton() = Button(service).apply {
+        text = "创建"
+        isAllCaps = false
+        tag = TAG_CREATE
+        setOnClickListener { createCurrentCode() }
+    }
+
     private fun onAction(action: LicenseAction, button: Button) {
         val code = currentCode ?: return
-        if (!currentActionable) return
+        if (!backendActionable) return
         val now = System.currentTimeMillis()
         if (action.destructive && (confirmAction != action || now > confirmUntil)) {
             confirmAction = action
@@ -255,24 +256,68 @@ class OverlayController(private val service: Service) {
 
         confirmAction = null
         val command = if (action == LicenseAction.RENEW) LicenseCommand(code, action, config.renewHours) else LicenseCommand(code, action)
-        setButtonsEnabled(false)
+        setActionAvailability(false, false)
         setStatus("处理中…")
         latestRequestId = api.execute(command) { requestId, result -> handler.post {
             if (requestId != latestRequestId || currentCode != code) return@post
-            if (result is ApiResult.Success) currentActionable = result.value.source == "backend"
+            backendActionable = result is ApiResult.Success && result.value.source == "backend"
+            createAllowed = false
             renderResult(result)
-            setButtonsEnabled(currentActionable)
+            setActionAvailability(backendActionable, createAllowed)
+        } }
+    }
+
+    private fun createCurrentCode() {
+        val code = currentCode ?: return
+        if (!createAllowed) return
+        if (!code.matches(Regex("\\d{9}"))) {
+            setStatus("创建失败：测试服通用卡必须是 9 位纯数字")
+            return
+        }
+
+        backendActionable = false
+        createAllowed = false
+        setActionAvailability(false, false)
+        setStatus("正在创建测试服通用卡…")
+        latestRequestId = api.createGeneralStock(code) { requestId, result -> handler.post {
+            if (requestId != latestRequestId || currentCode != code) return@post
+            renderResult(result)
+            backendActionable = false
+            createAllowed = false
+            setActionAvailability(false, false)
         } }
     }
 
     private fun queryCurrent() {
         val code = currentCode ?: return
-        setButtonsEnabled(false)
+        setActionAvailability(false, false)
         latestRequestId = api.query(code) { requestId, result -> handler.post {
             if (requestId != latestRequestId || currentCode != code) return@post
-            currentActionable = result is ApiResult.Success && result.value.source == "backend"
-            renderResult(result)
-            setButtonsEnabled(currentActionable)
+
+            when (result) {
+                is ApiResult.Success -> {
+                    backendActionable = result.value.source == "backend"
+                    createAllowed = false
+                    renderResult(result)
+                }
+                is ApiResult.Failure -> {
+                    backendActionable = false
+                    if (result.httpCode == 404) {
+                        createAllowed = code.matches(Regex("\\d{9}"))
+                        setStatus(
+                            if (createAllowed) {
+                                "状态：未创建\n绑定：未绑定\n可点击“创建”，将建立测试服通用永久卡"
+                            } else {
+                                "状态：未创建\n绑定：未绑定\n创建测试服通用卡要求 9 位纯数字"
+                            }
+                        )
+                    } else {
+                        createAllowed = false
+                        renderResult(result)
+                    }
+                }
+            }
+            setActionAvailability(backendActionable, createAllowed)
         } }
     }
 
@@ -280,8 +325,11 @@ class OverlayController(private val service: Service) {
         when (result) {
             is ApiResult.Success -> {
                 val s = result.value
-                val parts = mutableListOf(if (s.source == "stock") "类型：库存码" else "类型：正式授权", "状态：${s.status}")
-                s.bindingStatus?.let { parts += "绑定：$it" }
+                val parts = mutableListOf(
+                    if (s.source == "stock") "类型：测试服库存卡" else "类型：正式授权",
+                    "状态：${statusToChinese(s.status)}"
+                )
+                s.bindingStatus?.let { parts += "绑定：${bindingToChinese(it)}" }
                 s.expiresAt?.let { parts += "到期：$it" }
                 if (s.message.isNotBlank()) parts += s.message
                 setStatus(parts.joinToString("\n"))
@@ -290,12 +338,45 @@ class OverlayController(private val service: Service) {
         }
     }
 
+    private fun statusToChinese(value: String): String = when (value.lowercase()) {
+        "unused" -> "未使用"
+        "available" -> "可用"
+        "issued" -> "已发出"
+        "activated" -> "已激活"
+        "used" -> "已使用"
+        "expired" -> "已过期"
+        "disabled" -> "已停用"
+        "deleted" -> "已删除"
+        "discarded" -> "已废弃"
+        "processing" -> "处理中"
+        "unknown" -> "未知"
+        else -> value
+    }
+
+    private fun bindingToChinese(value: String): String = when (value.lowercase()) {
+        "unbound" -> "未绑定"
+        "bound" -> "已绑定"
+        "binding" -> "绑定中"
+        "refund_blocked" -> "退款锁定"
+        "blocked" -> "已锁定"
+        "released" -> "已解绑"
+        "unknown" -> "未知"
+        else -> value
+    }
+
     private fun setStatus(value: String) { panel?.findViewWithTag<TextView>(TAG_STATUS)?.text = value }
-    private fun setButtonsEnabled(enabled: Boolean) { LicenseAction.entries.forEach { panel?.findViewWithTag<Button>(it)?.isEnabled = enabled } }
+
+    private fun setActionAvailability(backendEnabled: Boolean, createEnabled: Boolean) {
+        panel?.findViewWithTag<Button>(LicenseAction.ACTIVATE)?.isEnabled = backendEnabled
+        panel?.findViewWithTag<Button>(LicenseAction.REFUND_DISABLE)?.isEnabled = backendEnabled
+        panel?.findViewWithTag<Button>(LicenseAction.UNBIND)?.isEnabled = backendEnabled
+        panel?.findViewWithTag<Button>(TAG_CREATE)?.isEnabled = createEnabled
+    }
+
     private fun collapse() { removePanel(); if (screenActive) showBubble() }
 
     private fun hideAll() {
-        removePanel(); removeBubble(); currentCode = null; currentActionable = false; latestRequestId = -1L; clipboardReading = false
+        removePanel(); removeBubble(); currentCode = null; backendActionable = false; createAllowed = false; latestRequestId = -1L; clipboardReading = false
     }
 
     private fun removeBubble() { bubble?.let { runCatching { wm.removeView(it) } }; bubble = null; bubbleParams = null }
@@ -310,5 +391,8 @@ class OverlayController(private val service: Service) {
     private fun rounded(color: Int, radius: Float) = GradientDrawable().apply { setColor(color); cornerRadius = radius }
     private fun dp(value: Int): Int = (value * service.resources.displayMetrics.density + 0.5f).toInt()
 
-    companion object { private const val TAG_STATUS = "status" }
+    companion object {
+        private const val TAG_STATUS = "status"
+        private const val TAG_CREATE = "create"
+    }
 }
