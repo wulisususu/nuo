@@ -1,6 +1,6 @@
 # Android License Overlay Assistant
 
-仓库现在同时维护两个可共存版本。
+仓库同时维护两个可共存版本。
 
 ## 版本 A：V4 无障碍版
 
@@ -18,13 +18,13 @@ version: 0.4.0
 - 点击悬浮球原地读取一次剪贴板，不再启动透明 Activity。
 - 灭屏隐藏、亮屏恢复。
 
-## 版本 B：无需无障碍 V1 悬浮窗版
+## 版本 B：无需无障碍 V2 悬浮窗版
 
 模块：`overlayonly`
 
 ```text
 applicationId: com.wulisu.licenseoverlay.overlayonly
-version: 1.0.0-noaccessibility
+version: 2.0.0-noaccessibility
 ```
 
 特点：
@@ -32,15 +32,68 @@ version: 1.0.0-noaccessibility
 - **不申请、也不使用无障碍服务。**
 - 只需要用户授予系统“显示在其他应用上层”权限。
 - 使用 `SYSTEM_ALERT_WINDOW + TYPE_APPLICATION_OVERLAY`。
-- 使用 Android 14+ 要求的 `specialUse` 前台服务类型保持用户主动开启的悬浮服务。
+- 使用 Android 14+ 的 `specialUse` 前台服务类型保持用户主动开启的悬浮服务。
 - 亮屏时悬浮球常驻所有页面；灭屏隐藏。
 - 点击“码”时悬浮窗口短暂获取输入焦点，读取一次剪贴板，随后恢复 `FLAG_NOT_FOCUSABLE`。
 - 不启动 Activity，因此不会因为读取剪贴板跳回本应用。
-- 和 V4 包名不同，可以同时安装；测试其中一个时关闭另一个的悬浮服务即可。
+- 和 V4 包名不同，可以同时安装；测试其中一个时关闭另一个即可。
+
+### V2 创建功能
+
+悬浮面板按钮为：
+
+```text
+激活 / 退款停用 / 创建 / 解绑
+```
+
+“创建”替代了 V1 的“续期 30 天”。
+
+当剪贴板识别到 **9 位纯数字**，且正式授权表、库存表都不存在该号码时，“创建”按钮会启用，并调用：
+
+```text
+POST /api/test-card-stock/create
+```
+
+创建固定为测试服通用卡：
+
+```text
+card_no = 输入的 9 位数字
+card_secret = 同一串 9 位数字
+card_type = long_term
+game_scope = ALL
+scope = ALL
+duration_kind = PERMANENT
+allocation_mode = LEGACY_ALL
+```
+
+也就是测试服 ALL 通用、永久库存卡。后台已有相同卡号时不会重复创建。
+
+### 中文状态显示
+
+V2 悬浮面板会把服务器状态翻译成中文，例如：
+
+```text
+unused -> 未使用
+available -> 可用
+issued -> 已发出
+activated -> 已激活
+used -> 已使用
+expired -> 已过期
+disabled -> 已停用
+deleted -> 已删除
+discarded -> 已废弃
+
+unbound -> 未绑定
+bound -> 已绑定
+binding -> 绑定中
+refund_blocked -> 退款锁定
+blocked -> 已锁定
+released -> 已解绑
+```
 
 ## 共用业务逻辑
 
-两个版本共享同一套已验证源码：
+两个版本共享：
 
 ```text
 app/src/main/java/com/wulisu/licenseoverlay/api/
@@ -48,18 +101,19 @@ app/src/main/java/com/wulisu/licenseoverlay/config/
 app/src/main/java/com/wulisu/licenseoverlay/core/
 ```
 
-因此激活码解析、服务器查询、Basic Auth、激活 / 退款停用 / 续期 / 解绑规则保持一致。
-
-服务器仍直接适配 `wulisususu/activation-code-system`：
+服务器直接适配 `wulisususu/activation-code-system`：
 
 ```text
 GET  /backend/cards?q=<code>&limit=20&offset=0
 GET  /api/test-card-stock/list?q=<code>&page=1&page_size=20
+POST /api/test-card-stock/create
 POST /backend/cards/{id}/activate
 POST /backend/cards/{id}/refund/disable
 POST /backend/cards/{id}/renew
 POST /backend/cards/{id}/unbind
 ```
+
+V4 仍保留原有续期功能；V2 悬浮窗版不显示续期按钮。
 
 支持 HTTP / HTTPS、Basic Auth，以及 Basic 未配置时的 Bearer Token 回退。
 
