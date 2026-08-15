@@ -9,4 +9,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "Android-License-Overlay-Assistant"
 include(":app")
-include(":overlayonly")

@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, floating-window]
   pull_request:
 
 permissions:
@@ -25,19 +25,12 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Build both debug APKs
-        run: gradle --no-daemon :app:assembleDebug :overlayonly:assembleDebug
+      - name: Build floating-window debug APK
+        run: gradle --no-daemon :app:assembleDebug
 
-      - name: Upload V4 accessibility APK
+      - name: Upload floating-window APK
         uses: actions/upload-artifact@v4
         with:
-          name: license-overlay-v4-debug-apk
+          name: license-overlay-floating-window-v2-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-
-      - name: Upload overlay-only V2 APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: license-overlay-no-accessibility-v2-debug-apk
-          path: overlayonly/build/outputs/apk/debug/overlayonly-debug.apk
           if-no-files-found: error

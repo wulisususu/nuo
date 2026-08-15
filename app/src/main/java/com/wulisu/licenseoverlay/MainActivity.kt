@@ -3,6 +3,7 @@ package com.wulisu.licenseoverlay
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
@@ -17,7 +18,7 @@ import android.widget.Toast
 import com.wulisu.licenseoverlay.config.BasicPasswordStore
 import com.wulisu.licenseoverlay.config.ConfigStore
 import com.wulisu.licenseoverlay.config.TokenStore
-import com.wulisu.licenseoverlay.service.LicenseAccessibilityService
+import com.wulisu.licenseoverlay.service.OverlayService
 
 class MainActivity : Activity() {
     private lateinit var config: ConfigStore
@@ -28,7 +29,7 @@ class MainActivity : Activity() {
     private lateinit var basicUsername: EditText
     private lateinit var basicPassword: EditText
     private lateinit var token: EditText
-    private lateinit var renewHours: EditText
+    private var startAfterPermission = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -38,8 +39,12 @@ class MainActivity : Activity() {
         setContentView(buildContent())
     }
 
-    override fun onStart() {
-        super.onStart()
+    override fun onResume() {
+        super.onResume()
+        if (startAfterPermission && Settings.canDrawOverlays(this)) {
+            startAfterPermission = false
+            startOverlayService()
+        }
         renderStatus()
     }
 
@@ -49,19 +54,21 @@ class MainActivity : Activity() {
             setPadding(dp(20), dp(18), dp(20), dp(28))
         }
 
-        root.addView(text("激活助手", 24f, true))
-        root.addView(text(
-            "启用无障碍服务后，只要设备处于亮屏可交互状态，悬浮球会在所有页面显示。点击悬浮球只读取一次剪贴板，不再跳回本应用。",
-            14f,
-            false
-        ).apply { setPadding(0, dp(8), 0, dp(16)) })
+        root.addView(text("激活助手·悬浮窗版 V2", 24f, true))
+        root.addView(text("无需无障碍。亮屏时悬浮球常驻所有页面；复制数字后点“码”即可查询。未创建的 6–12 位纯数字可以直接创建为测试服通用卡。", 14f, false).apply {
+            setPadding(0, dp(8), 0, dp(16))
+        })
 
         status = text("", 14f, false)
         root.addView(status)
 
-        root.addView(button("打开无障碍设置") {
-            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        root.addView(button("启用悬浮球") { enableOverlay() })
+        root.addView(button("关闭悬浮球") {
+            stopService(Intent(this, OverlayService::class.java))
+            Toast.makeText(this, "悬浮球已关闭", Toast.LENGTH_SHORT).show()
+            window.decorView.postDelayed({ renderStatus() }, 250)
         })
+        root.addView(button("打开悬浮窗权限设置") { openOverlayPermission() })
 
         root.addView(section("服务器"))
         baseUrl = input("HTTP / HTTPS 服务器地址", config.baseUrl)
@@ -80,51 +87,55 @@ class MainActivity : Activity() {
         }
         root.addView(token)
 
-        renewHours = input("默认续期小时数（1-998；999=永久）", config.renewHours.toString()).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER
-        }
-        root.addView(renewHours)
-
         root.addView(button("保存配置") {
-            val hours = renewHours.text.toString().toIntOrNull()?.coerceIn(1, 999) ?: 720
             config.baseUrl = baseUrl.text.toString()
             config.basicUsername = basicUsername.text.toString()
             basicPasswordStore.save(basicPassword.text.toString())
-            config.renewHours = hours
             tokenStore.save(token.text.toString())
             Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show()
             renderStatus()
         })
 
-        root.addView(section("当前模式"))
+        root.addView(section("V2 创建规则"))
         root.addView(text(
-            "• 亮屏：悬浮球始终显示\n" +
-                "• 灭屏：悬浮球自动隐藏\n" +
-                "• 不区分闲鱼 / 千牛 / 微信 / 桌面 / 设置\n" +
-                "• 点悬浮球：当前页面不切换，只读取剪贴板并识别激活码\n" +
-                "• 识别成功后：直接在悬浮面板查询 / 激活 / 停用 / 续期 / 解绑",
+            "当剪贴板识别到 6–12 位纯数字，且服务器中不存在该卡时，“创建”按钮会启用。创建后直接成为测试服通用正式卡：ALL 通用范围、永久有效、已激活、未绑定。已经存在的卡不会重复创建。",
             13f,
             false
         ))
 
+        root.addView(section("与 V4 共存"))
+        root.addView(text("本版包名为 com.wulisu.licenseoverlay.overlayonly，不会覆盖原 V4。测试本版时，建议先在原 V4 里关闭无障碍服务，避免出现两个“码”悬浮球。", 13f, false))
+
         return ScrollView(this).apply { addView(root) }
     }
 
-    private fun renderStatus() {
-        val serviceEnabled = LicenseAccessibilityService.INSTANCE != null
-        val auth = if (config.basicUsername.isNotBlank() && basicPasswordStore.read().isNotBlank()) {
-            "Basic Auth 已配置"
-        } else {
-            "Basic Auth 未配置"
+    private fun enableOverlay() {
+        if (!Settings.canDrawOverlays(this)) {
+            startAfterPermission = true
+            openOverlayPermission()
+            return
         }
-        status.text = (if (serviceEnabled) "后台悬浮服务：已启用" else "后台悬浮服务：未启用") +
-            "\n服务器：${config.baseUrl.ifBlank { "未配置" }}\n$auth"
-        status.setTextColor(if (serviceEnabled) 0xFF1B7F3A.toInt() else 0xFFB3261E.toInt())
+        startOverlayService()
     }
 
-    private fun section(value: String) = text(value, 17f, true).apply {
-        setPadding(0, dp(22), 0, dp(8))
+    private fun openOverlayPermission() {
+        startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
     }
+
+    private fun startOverlayService() {
+        startForegroundService(Intent(this, OverlayService::class.java))
+        Toast.makeText(this, "悬浮球已启用", Toast.LENGTH_SHORT).show()
+        window.decorView.postDelayed({ renderStatus() }, 250)
+    }
+
+    private fun renderStatus() {
+        val permission = Settings.canDrawOverlays(this)
+        val running = OverlayService.INSTANCE != null
+        status.text = "悬浮窗权限：${if (permission) "已允许" else "未允许"}\n悬浮服务：${if (running) "运行中" else "未运行"}\n服务器：${config.baseUrl.ifBlank { "未配置" }}"
+        status.setTextColor(if (permission && running) 0xFF1B7F3A.toInt() else 0xFFB3261E.toInt())
+    }
+
+    private fun section(value: String) = text(value, 17f, true).apply { setPadding(0, dp(22), 0, dp(8)) }
 
     private fun input(hint: String, value: String) = EditText(this).apply {
         this.hint = hint
