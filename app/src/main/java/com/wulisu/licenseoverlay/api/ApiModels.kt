@@ -6,6 +6,7 @@ data class LicenseSnapshot(
     val expiresAt: String? = null,
     val bindingStatus: String? = null,
     val machineCode: String? = null,
+    val scope: String? = null,
     val source: String = "backend",
     val message: String = ""
 )
