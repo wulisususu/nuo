@@ -6,8 +6,8 @@
 
 ## Branch policy
 
-- `main`：继续开发。
-- `floating-window`：当前悬浮窗 V2 稳定基线。
+- `main`：继续开发；当前为 V3。
+- `floating-window`：V2 稳定基线。
 
 除非用户明确要求同步稳定分支，后续修改只进入 `main`。
 
@@ -28,25 +28,62 @@
 - 不读取第三方页面节点。
 - Basic Auth/Token 不得提交到公开源码；私密构建通过环境变量注入。
 
+## Game detection
+
+V3 当前只适配：
+
+- `ZZZ`：绝区零 / ZZZ / Zenless / Remielle。
+- `WUWA`：鸣潮 / WUWA / Wuthering Waves / Zigrika。
+
+未识别到这两类时必须保持 V2 默认页面行为，不要擅自把其他游戏映射到 ZZZ/WUWA。
+
 ## Create semantics
 
-未存在的 6–12 位纯数字允许创建正式测试服通用卡：
+只有正式授权表和库存表都不存在该 6–12 位纯数字时才能创建。
+
+共同字段：
 
 ```text
 POST /backend/cards
-status=activated
-game_scope=ALL
-scope=ALL
+status=unused
 duration_kind=PERMANENT
 source_type=DIRECT
 binding_status=unbound
 ```
 
-已存在的卡不得重复创建。
+创建通用：
+
+```text
+game_scope=ALL
+scope=ALL
+legacy_compatible=true
+```
+
+创建专属：
+
+```text
+ZZZ  -> game_scope=ZZZ,  scope=ZZZ,  legacy_compatible=false
+WUWA -> game_scope=WUWA, scope=WUWA, legacy_compatible=false
+```
+
+禁止在创建阶段预先写 `status=activated`。首次真实客户端验证成功时，服务器会从 `unused` 自动切换为 `activated` 并建立机器绑定。
+
+## Server protocol source of truth
+
+服务端根据 `app_id` 映射 scope，不信任客户端 `game` 字段。
+
+```text
+zzz-remielle -> ZZZ
+zzz -> ZZZ
+wuwa-zigrika-commercial -> WUWA
+wuwa -> WUWA
+```
+
+新协议 `/api/verify` 的 verify 阶段带 app_id 时必须同时带 request_id。服务端还校验 hwid、card、password、设备状态、卡 scope、卡状态/到期、绑定关系和设备 scope 槽位。
 
 ## Validation
 
-构建只需要：
+构建至少执行：
 
 ```text
 :app:assembleDebug
