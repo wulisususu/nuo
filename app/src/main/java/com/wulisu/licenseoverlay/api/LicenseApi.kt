@@ -59,28 +59,44 @@ class LicenseApi(
         return requestId
     }
 
-    fun createGeneralCard(code: String, callback: (requestId: Long, ApiResult<LicenseSnapshot>) -> Unit): Long {
+    fun createCard(
+        code: String,
+        scope: String,
+        gameName: String? = null,
+        callback: (requestId: Long, ApiResult<LicenseSnapshot>) -> Unit
+    ): Long {
         val requestId = sequence.incrementAndGet()
         executor.execute {
             val result: ApiResult<LicenseSnapshot> = try {
                 if (!code.matches(Regex("\\d{6,12}"))) {
-                    ApiResult.Failure("测试服通用卡必须是 6–12 位纯数字")
+                    ApiResult.Failure("激活码必须是 6–12 位纯数字")
                 } else {
+                    val normalizedScope = scope.uppercase().takeIf { it in setOf("ALL", "ZZZ", "WUWA") } ?: "ALL"
+                    val isUniversal = normalizedScope == "ALL"
+                    val note = if (isUniversal) {
+                        "悬浮窗V3创建：测试服通用卡"
+                    } else {
+                        "悬浮窗V3创建：${gameName ?: normalizedScope}专属卡"
+                    }
                     val body = JSONObject()
                         .put("card_no", code)
                         .put("card_secret", code)
-                        .put("status", "activated")
-                        .put("game_scope", "ALL")
-                        .put("scope", "ALL")
+                        .put("status", "unused")
+                        .put("game_scope", normalizedScope)
+                        .put("scope", normalizedScope)
                         .put("duration_kind", "PERMANENT")
                         .put("source_type", "DIRECT")
-                        .put("legacy_compatible", true)
+                        .put("legacy_compatible", isUniversal)
                         .put("binding_status", "unbound")
-                        .put("note", "悬浮窗V2创建：测试服通用卡")
+                        .put("note", note)
                     when (val response = performJson("POST", "/backend/cards", body)) {
                         is ApiResult.Failure -> response
                         is ApiResult.Success -> ApiResult.Success(
-                            snapshotFromBackend(response.value, code, "创建成功：测试服通用永久卡")
+                            snapshotFromBackend(
+                                response.value,
+                                code,
+                                if (isUniversal) "创建成功：测试服通用永久卡" else "创建成功：${gameName ?: normalizedScope}专属永久卡"
+                            )
                         )
                     }
                 }
@@ -91,6 +107,9 @@ class LicenseApi(
         }
         return requestId
     }
+
+    fun createGeneralCard(code: String, callback: (requestId: Long, ApiResult<LicenseSnapshot>) -> Unit): Long =
+        createCard(code, "ALL", null, callback)
 
     fun close() = executor.shutdownNow()
 
@@ -160,12 +179,14 @@ class LicenseApi(
         val resolvedCode = json.optString("card_secret").takeIf { it.isNotBlank() }
             ?: json.optString("card_no").takeIf { it.isNotBlank() }
             ?: fallbackCode
+        val scope = nullableString(json, "scope") ?: nullableString(json, "game_scope")
         return LicenseSnapshot(
             code = resolvedCode,
             status = json.optString("status", "unknown"),
             expiresAt = nullableString(json, "expires_at"),
             bindingStatus = nullableString(json, "binding_status"),
             machineCode = nullableString(json, "machine_code"),
+            scope = scope,
             source = "backend",
             message = message
         )
@@ -179,9 +200,11 @@ class LicenseApi(
         val resolvedCode = json.optString("card_secret").takeIf { it.isNotBlank() }
             ?: json.optString("card_no").takeIf { it.isNotBlank() }
             ?: fallbackCode
+        val scope = nullableString(json, "scope") ?: nullableString(json, "game_scope")
         return LicenseSnapshot(
             code = resolvedCode,
             status = json.optString("status", "unknown"),
+            scope = scope,
             source = "stock",
             message = message
         )
