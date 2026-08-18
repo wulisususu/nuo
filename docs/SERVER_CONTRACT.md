@@ -57,7 +57,106 @@ card_secret == code || card_no == code
 GET /api/test-card-stock/list?q=<code>&page=1&page_size=20
 ```
 
-库存码只展示状态，不执行正式卡写动作。
+只有正式授权和库存都完全不存在时，V3 才允许新建卡。
+
+## V3 Create
+
+创建正式卡：
+
+```http
+POST /backend/cards
+Content-Type: application/json
+```
+
+共同字段：
+
+```json
+{
+  "card_no": "12345678",
+  "card_secret": "12345678",
+  "status": "unused",
+  "duration_kind": "PERMANENT",
+  "source_type": "DIRECT",
+  "binding_status": "unbound"
+}
+```
+
+创建通用卡额外写入：
+
+```json
+{
+  "game_scope": "ALL",
+  "scope": "ALL",
+  "legacy_compatible": true
+}
+```
+
+创建绝区零专属卡：
+
+```json
+{
+  "game_scope": "ZZZ",
+  "scope": "ZZZ",
+  "legacy_compatible": false
+}
+```
+
+创建鸣潮专属卡：
+
+```json
+{
+  "game_scope": "WUWA",
+  "scope": "WUWA",
+  "legacy_compatible": false
+}
+```
+
+创建阶段禁止预激活。新卡保持 `unused + unbound`，第一次真实客户端验证成功后由服务器自动变成 `activated` 并绑定设备。
+
+## Client verification and app_id
+
+服务端只使用 `app_id -> scope` 映射决定请求属于哪个游戏，不信任客户端 `game` 字段。
+
+当前 V3 关注映射：
+
+```text
+zzz-remielle -> ZZZ
+zzz -> ZZZ
+wuwa-zigrika-commercial -> WUWA
+wuwa -> WUWA
+```
+
+主验证接口：
+
+```http
+POST /api/verify
+```
+
+新版 verify 阶段至少需要：
+
+```json
+{
+  "stage": "verify",
+  "hwid": "MACHINE-HASH",
+  "card": "12345678",
+  "password": "12345678",
+  "app_id": "zzz-remielle",
+  "request_id": "unique-request-id"
+}
+```
+
+`request_id` 长度 8~128 字符；同一次重试必须复用同一个 request_id 和完全一致的请求参数。
+
+服务器会校验：
+
+- `app_id` 是否存在服务端映射；
+- 设备是否正常、是否被封禁或退款锁定；
+- 卡号与卡密是否匹配；
+- 卡范围是 `ALL` 或与当前 app_id 映射 scope 一致；
+- 卡是否停用、删除、过期；
+- 卡是否已经绑定另一台设备；
+- 当前设备同 scope 槽位是否已被其他不可替换授权占用；
+- 如果来自库存，还会校验库存状态、库存分配模式和 scope。
 
 ## Actions
 
@@ -79,7 +178,7 @@ Content-Type: application/json
 {}
 ```
 
-续期：
+续期（服务端仍支持，V3 悬浮窗不显示该按钮）：
 
 ```http
 POST /backend/cards/{card_id}/renew
