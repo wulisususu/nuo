@@ -54,10 +54,12 @@ class MainActivity : Activity() {
             setPadding(dp(20), dp(18), dp(20), dp(28))
         }
 
-        root.addView(text("激活助手·悬浮窗版 V2", 24f, true))
-        root.addView(text("无需无障碍。亮屏时悬浮球常驻所有页面；复制数字后点“码”即可查询。未创建的 6–12 位纯数字可以直接创建为测试服通用卡。", 14f, false).apply {
-            setPadding(0, dp(8), 0, dp(16))
-        })
+        root.addView(text("激活助手·悬浮窗版 V3", 24f, true))
+        root.addView(text(
+            "无需无障碍。复制整段发货文字后点“码”，会提取激活码并识别已适配游戏。当前已适配绝区零（ZZZ）和鸣潮（WUWA）。",
+            14f,
+            false
+        ).apply { setPadding(0, dp(8), 0, dp(16)) })
 
         status = text("", 14f, false)
         root.addView(status)
@@ -96,15 +98,19 @@ class MainActivity : Activity() {
             renderStatus()
         })
 
-        root.addView(section("V2 创建规则"))
+        root.addView(section("V3 创建规则"))
         root.addView(text(
-            "当剪贴板识别到 6–12 位纯数字，且服务器中不存在该卡时，“创建”按钮会启用。创建后直接成为测试服通用正式卡：ALL 通用范围、永久有效、已激活、未绑定。已经存在的卡不会重复创建。",
+            "服务器中完全不存在的 6–12 位数字：如果识别到绝区零或鸣潮，只显示“创建通用 / 创建专属”；未识别到已适配游戏时保持 V2 的普通创建页面。新建卡固定为永久、未使用、未绑定，第一次真实客户端验证成功后再由服务器自动激活和绑定。",
             13f,
             false
         ))
 
-        root.addView(section("与 V4 共存"))
-        root.addView(text("本版包名为 com.wulisu.licenseoverlay.overlayonly，不会覆盖原 V4。测试本版时，建议先在原 V4 里关闭无障碍服务，避免出现两个“码”悬浮球。", 13f, false))
+        root.addView(section("当前专属范围"))
+        root.addView(text(
+            "绝区零专属：scope=ZZZ，对应 app_id 为 zzz-remielle / zzz。\n鸣潮专属：scope=WUWA，对应 app_id 为 wuwa-zigrika-commercial / wuwa。\n通用卡：scope=ALL。",
+            13f,
+            false
+        ))
 
         return ScrollView(this).apply { addView(root) }
     }
