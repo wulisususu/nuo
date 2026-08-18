@@ -22,6 +22,8 @@ import com.wulisu.licenseoverlay.config.BasicPasswordStore
 import com.wulisu.licenseoverlay.config.ConfigStore
 import com.wulisu.licenseoverlay.config.TokenStore
 import com.wulisu.licenseoverlay.core.ActivationCodeParser
+import com.wulisu.licenseoverlay.core.DetectedGame
+import com.wulisu.licenseoverlay.core.GameDetector
 import com.wulisu.licenseoverlay.core.LicenseAction
 import com.wulisu.licenseoverlay.core.LicenseCommand
 import com.wulisu.licenseoverlay.core.ParseResult
@@ -47,6 +49,7 @@ class OverlayController(private val service: Service) {
     private var screenActive = false
     private var clipboardReading = false
     private var currentCode: String? = null
+    private var currentGame: DetectedGame? = null
     private var backendActionable = false
     private var createAllowed = false
     private var latestRequestId = 0L
@@ -100,7 +103,11 @@ class OverlayController(private val service: Service) {
         view.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    downX = event.rawX; downY = event.rawY; startY = params.y; moved = false; true
+                    downX = event.rawX
+                    downY = event.rawY
+                    startY = params.y
+                    moved = false
+                    true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     if (kotlin.math.abs(event.rawY - downY) > dp(4) || kotlin.math.abs(event.rawX - downX) > dp(4)) moved = true
@@ -108,7 +115,10 @@ class OverlayController(private val service: Service) {
                     runCatching { wm.updateViewLayout(view, params) }
                     true
                 }
-                MotionEvent.ACTION_UP -> { if (!moved) view.performClick(); true }
+                MotionEvent.ACTION_UP -> {
+                    if (!moved) view.performClick()
+                    true
+                }
                 else -> false
             }
         }
@@ -127,9 +137,18 @@ class OverlayController(private val service: Service) {
         val focusView: View
         val params: WindowManager.LayoutParams
         when {
-            panel != null && panelParams != null -> { focusView = panel!!; params = panelParams!! }
-            bubble != null && bubbleParams != null -> { focusView = bubble!!; params = bubbleParams!! }
-            else -> { clipboardReading = false; return }
+            panel != null && panelParams != null -> {
+                focusView = panel!!
+                params = panelParams!!
+            }
+            bubble != null && bubbleParams != null -> {
+                focusView = bubble!!
+                params = bubbleParams!!
+            }
+            else -> {
+                clipboardReading = false
+                return
+            }
         }
 
         val originalFlags = params.flags
@@ -150,19 +169,25 @@ class OverlayController(private val service: Service) {
     }
 
     private fun clipboardText(): String? = runCatching {
-        clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(service)?.toString()
+        clipboard.primaryClip
+            ?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)
+            ?.coerceToText(service)
+            ?.toString()
     }.getOrNull()
 
     private fun handleClipboard(text: String?) {
         if (!screenActive) return
         if (text.isNullOrBlank()) {
             currentCode = null
+            currentGame = null
             backendActionable = false
             createAllowed = false
             openPanel("未读取到剪贴板。请先复制内容后再点“码”。")
             return
         }
 
+        currentGame = GameDetector.detect(text)
         backendActionable = false
         createAllowed = false
         when (val result = ActivationCodeParser.parse(text)) {
@@ -183,7 +208,8 @@ class OverlayController(private val service: Service) {
     }
 
     private fun openPanel(initialMessage: String) {
-        removeBubble(); removePanel()
+        removeBubble()
+        removePanel()
         val root = LinearLayout(service).apply {
             orientation = LinearLayout.VERTICAL
             isFocusable = true
@@ -192,49 +218,94 @@ class OverlayController(private val service: Service) {
             background = rounded(0xEE1E1E1E.toInt(), dp(16).toFloat())
         }
         val titleRow = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL }
-        titleRow.addView(label("激活助手·悬浮窗 V2", 16f, true), LinearLayout.LayoutParams(0, dp(36), 1f))
+        titleRow.addView(label("激活助手·悬浮窗 V3", 16f, true), LinearLayout.LayoutParams(0, dp(36), 1f))
         titleRow.addView(Button(service).apply {
-            text = "×"; textSize = 18f; minWidth = 0; minimumWidth = 0; setPadding(0,0,0,0)
+            text = "×"
+            textSize = 18f
+            minWidth = 0
+            minimumWidth = 0
+            setPadding(0, 0, 0, 0)
             setOnClickListener { collapse() }
         }, LinearLayout.LayoutParams(dp(44), dp(36)))
         root.addView(titleRow)
         root.addView(label(currentCode ?: "—", 20f, true), LinearLayout.LayoutParams(-1, dp(42)))
-        root.addView(label(initialMessage, 13f, false).apply { tag = TAG_STATUS }, LinearLayout.LayoutParams(-1, dp(88)))
+        root.addView(label(initialMessage, 13f, false).apply { tag = TAG_STATUS }, LinearLayout.LayoutParams(-1, dp(104)))
+        root.addView(LinearLayout(service).apply {
+            orientation = LinearLayout.VERTICAL
+            tag = TAG_ACTIONS
+        }, LinearLayout.LayoutParams(-1, LinearLayout.LayoutParams.WRAP_CONTENT))
+        root.addView(Button(service).apply {
+            text = "重新读取剪贴板"
+            isAllCaps = false
+            setOnClickListener { readClipboard() }
+        }, LinearLayout.LayoutParams(-1, dp(42)))
+
+        val params = WindowManager.LayoutParams(
+            dp(304),
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            x = dp(8)
+        }
+        wm.addView(root, params)
+        panel = root
+        panelParams = params
+        renderManagementActions()
+        setManagementAvailability(false, false)
+    }
+
+    private fun actionsArea(): LinearLayout? = panel?.findViewWithTag(TAG_ACTIONS)
+
+    private fun renderManagementActions() {
+        val area = actionsArea() ?: return
+        area.removeAllViews()
 
         val row1 = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL }
         row1.addView(actionButton("激活", LicenseAction.ACTIVATE), weightedButtonParams())
         row1.addView(actionButton("退款停用", LicenseAction.REFUND_DISABLE), weightedButtonParams())
-        root.addView(row1)
+        area.addView(row1)
 
         val row2 = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL }
-        row2.addView(createButton(), weightedButtonParams())
+        row2.addView(defaultCreateButton(), weightedButtonParams())
         row2.addView(actionButton("解绑", LicenseAction.UNBIND), weightedButtonParams())
-        root.addView(row2)
+        area.addView(row2)
+    }
 
-        root.addView(Button(service).apply {
-            text = "重新读取剪贴板"; isAllCaps = false; setOnClickListener { readClipboard() }
-        }, LinearLayout.LayoutParams(-1, dp(42)))
+    private fun renderGameCreateActions(game: DetectedGame) {
+        val area = actionsArea() ?: return
+        area.removeAllViews()
+        area.addView(label("识别到：${game.displayName}（${game.scope}）", 14f, true).apply {
+            gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(-1, dp(34)))
 
-        val params = WindowManager.LayoutParams(
-            dp(292), WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-            PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.CENTER_VERTICAL or Gravity.END; x = dp(8) }
-        wm.addView(root, params)
-        panel = root
-        panelParams = params
-        setActionAvailability(false, false)
+        val row = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL }
+        row.addView(createButton("创建通用", "ALL"), weightedButtonParams())
+        row.addView(createButton("创建专属", game.scope), weightedButtonParams())
+        area.addView(row)
     }
 
     private fun actionButton(text: String, action: LicenseAction) = Button(service).apply {
-        this.text = text; isAllCaps = false; tag = action; setOnClickListener { onAction(action, this) }
+        this.text = text
+        isAllCaps = false
+        tag = action
+        setOnClickListener { onAction(action, this) }
     }
 
-    private fun createButton() = Button(service).apply {
+    private fun defaultCreateButton() = Button(service).apply {
         text = "创建"
         isAllCaps = false
-        tag = TAG_CREATE
-        setOnClickListener { createCurrentCode() }
+        tag = TAG_CREATE_DEFAULT
+        setOnClickListener { createCurrentCode("ALL") }
+    }
+
+    private fun createButton(label: String, scope: String) = Button(service).apply {
+        text = label
+        isAllCaps = false
+        tag = if (scope == "ALL") TAG_CREATE_GENERAL else TAG_CREATE_DEDICATED
+        setOnClickListener { createCurrentCode(scope) }
     }
 
     private fun onAction(action: LicenseAction, button: Button) {
@@ -248,49 +319,83 @@ class OverlayController(private val service: Service) {
             button.text = if (action == LicenseAction.UNBIND) "确认解绑" else "确认退款停用"
             handler.postDelayed({
                 if (button.isAttachedToWindow && confirmAction == action && System.currentTimeMillis() >= confirmUntil) {
-                    button.text = original; confirmAction = null
+                    button.text = original
+                    confirmAction = null
                 }
             }, 3_050)
             return
         }
 
         confirmAction = null
-        val command = if (action == LicenseAction.RENEW) LicenseCommand(code, action, config.renewHours) else LicenseCommand(code, action)
-        setActionAvailability(false, false)
+        val command = if (action == LicenseAction.RENEW) {
+            LicenseCommand(code, action, config.renewHours)
+        } else {
+            LicenseCommand(code, action)
+        }
+        setAllActionButtonsEnabled(false)
         setStatus("处理中…")
         latestRequestId = api.execute(command) { requestId, result -> handler.post {
             if (requestId != latestRequestId || currentCode != code) return@post
             backendActionable = result is ApiResult.Success && result.value.source == "backend"
             createAllowed = false
+            renderManagementActions()
             renderResult(result)
-            setActionAvailability(backendActionable, createAllowed)
+            setManagementAvailability(backendActionable, false)
         } }
     }
 
-    private fun createCurrentCode() {
+    private fun createCurrentCode(scope: String) {
         val code = currentCode ?: return
         if (!createAllowed) return
         if (!code.matches(Regex("\\d{6,12}"))) {
-            setStatus("创建失败：测试服通用卡必须是 6–12 位纯数字")
+            setStatus("创建失败：激活码必须是 6–12 位纯数字")
+            return
+        }
+
+        val normalizedScope = scope.uppercase()
+        val game = currentGame
+        if (normalizedScope != "ALL" && (game == null || normalizedScope != game.scope)) {
+            setStatus("创建失败：无法确认专属游戏")
             return
         }
 
         backendActionable = false
         createAllowed = false
-        setActionAvailability(false, false)
-        setStatus("正在创建测试服通用卡…")
-        latestRequestId = api.createGeneralCard(code) { requestId, result -> handler.post {
+        setAllActionButtonsEnabled(false)
+        setStatus(
+            if (normalizedScope == "ALL") "正在创建通用永久卡…"
+            else "正在创建${game!!.displayName}专属永久卡…"
+        )
+        latestRequestId = api.createCard(
+            code = code,
+            scope = normalizedScope,
+            gameName = game?.displayName
+        ) { requestId, result -> handler.post {
             if (requestId != latestRequestId || currentCode != code) return@post
-            backendActionable = result is ApiResult.Success && result.value.source == "backend"
-            createAllowed = false
-            renderResult(result)
-            setActionAvailability(backendActionable, false)
+            if (result is ApiResult.Success) {
+                backendActionable = result.value.source == "backend"
+                createAllowed = false
+                renderManagementActions()
+                renderResult(result)
+                setManagementAvailability(backendActionable, false)
+            } else {
+                backendActionable = false
+                createAllowed = true
+                if (game != null) {
+                    renderGameCreateActions(game)
+                    setGameCreateAvailability(true)
+                } else {
+                    renderManagementActions()
+                    setManagementAvailability(false, true)
+                }
+                renderResult(result)
+            }
         } }
     }
 
     private fun queryCurrent() {
         val code = currentCode ?: return
-        setActionAvailability(false, false)
+        setAllActionButtonsEnabled(false)
         latestRequestId = api.query(code) { requestId, result -> handler.post {
             if (requestId != latestRequestId || currentCode != code) return@post
 
@@ -298,26 +403,42 @@ class OverlayController(private val service: Service) {
                 is ApiResult.Success -> {
                     backendActionable = result.value.source == "backend"
                     createAllowed = false
+                    renderManagementActions()
                     renderResult(result)
+                    setManagementAvailability(backendActionable, false)
                 }
                 is ApiResult.Failure -> {
                     backendActionable = false
                     if (result.httpCode == 404) {
                         createAllowed = code.matches(Regex("\\d{6,12}"))
-                        setStatus(
-                            if (createAllowed) {
-                                "状态：未创建\n绑定：未绑定\n可点击“创建”，将建立测试服 ALL 通用永久卡"
-                            } else {
-                                "状态：未创建\n绑定：未绑定\n创建要求 6–12 位纯数字"
-                            }
-                        )
+                        val game = currentGame
+                        if (createAllowed && game != null) {
+                            renderGameCreateActions(game)
+                            setStatus(
+                                "识别到：${game.displayName}（${game.scope}）\n" +
+                                    "状态：未创建\n绑定：未绑定\n" +
+                                    "请选择创建通用卡或${game.displayName}专属卡"
+                            )
+                            setGameCreateAvailability(true)
+                        } else {
+                            renderManagementActions()
+                            setStatus(
+                                if (createAllowed) {
+                                    "状态：未创建\n绑定：未绑定\n可点击“创建”，将建立测试服 ALL 通用永久卡"
+                                } else {
+                                    "状态：未创建\n绑定：未绑定\n创建要求 6–12 位纯数字"
+                                }
+                            )
+                            setManagementAvailability(false, createAllowed)
+                        }
                     } else {
                         createAllowed = false
+                        renderManagementActions()
                         renderResult(result)
+                        setManagementAvailability(false, false)
                     }
                 }
             }
-            setActionAvailability(backendActionable, createAllowed)
         } }
     }
 
@@ -329,6 +450,7 @@ class OverlayController(private val service: Service) {
                     if (s.source == "stock") "类型：测试服库存卡" else "类型：正式授权",
                     "状态：${statusToChinese(s.status)}"
                 )
+                s.scope?.let { parts += "范围：${scopeToChinese(it)}" }
                 s.bindingStatus?.let { parts += "绑定：${bindingToChinese(it)}" }
                 s.expiresAt?.let { parts += "到期：$it" }
                 if (s.message.isNotBlank()) parts += s.message
@@ -366,35 +488,92 @@ class OverlayController(private val service: Service) {
         else -> value
     }
 
-    private fun setStatus(value: String) { panel?.findViewWithTag<TextView>(TAG_STATUS)?.text = value }
+    private fun scopeToChinese(value: String): String = when (value.uppercase()) {
+        "ALL" -> "全游戏通用"
+        "ZZZ" -> "绝区零专属"
+        "WUWA" -> "鸣潮专属"
+        "HSR" -> "崩铁专属"
+        "UNASSIGNED" -> "待分配"
+        else -> value
+    }
 
-    private fun setActionAvailability(backendEnabled: Boolean, createEnabled: Boolean) {
+    private fun setStatus(value: String) {
+        panel?.findViewWithTag<TextView>(TAG_STATUS)?.text = value
+    }
+
+    private fun setManagementAvailability(backendEnabled: Boolean, createEnabled: Boolean) {
         panel?.findViewWithTag<Button>(LicenseAction.ACTIVATE)?.isEnabled = backendEnabled
         panel?.findViewWithTag<Button>(LicenseAction.REFUND_DISABLE)?.isEnabled = backendEnabled
         panel?.findViewWithTag<Button>(LicenseAction.UNBIND)?.isEnabled = backendEnabled
-        panel?.findViewWithTag<Button>(TAG_CREATE)?.isEnabled = createEnabled
+        panel?.findViewWithTag<Button>(TAG_CREATE_DEFAULT)?.isEnabled = createEnabled
     }
 
-    private fun collapse() { removePanel(); if (screenActive) showBubble() }
+    private fun setGameCreateAvailability(enabled: Boolean) {
+        panel?.findViewWithTag<Button>(TAG_CREATE_GENERAL)?.isEnabled = enabled
+        panel?.findViewWithTag<Button>(TAG_CREATE_DEDICATED)?.isEnabled = enabled
+    }
+
+    private fun setAllActionButtonsEnabled(enabled: Boolean) {
+        panel?.findViewWithTag<Button>(LicenseAction.ACTIVATE)?.isEnabled = enabled
+        panel?.findViewWithTag<Button>(LicenseAction.REFUND_DISABLE)?.isEnabled = enabled
+        panel?.findViewWithTag<Button>(LicenseAction.UNBIND)?.isEnabled = enabled
+        panel?.findViewWithTag<Button>(TAG_CREATE_DEFAULT)?.isEnabled = enabled
+        panel?.findViewWithTag<Button>(TAG_CREATE_GENERAL)?.isEnabled = enabled
+        panel?.findViewWithTag<Button>(TAG_CREATE_DEDICATED)?.isEnabled = enabled
+    }
+
+    private fun collapse() {
+        removePanel()
+        if (screenActive) showBubble()
+    }
 
     private fun hideAll() {
-        removePanel(); removeBubble(); currentCode = null; backendActionable = false; createAllowed = false; latestRequestId = -1L; clipboardReading = false
+        removePanel()
+        removeBubble()
+        currentCode = null
+        currentGame = null
+        backendActionable = false
+        createAllowed = false
+        latestRequestId = -1L
+        clipboardReading = false
     }
 
-    private fun removeBubble() { bubble?.let { runCatching { wm.removeView(it) } }; bubble = null; bubbleParams = null }
-    private fun removePanel() { panel?.let { runCatching { wm.removeView(it) } }; panel = null; panelParams = null }
+    private fun removeBubble() {
+        bubble?.let { runCatching { wm.removeView(it) } }
+        bubble = null
+        bubbleParams = null
+    }
+
+    private fun removePanel() {
+        panel?.let { runCatching { wm.removeView(it) } }
+        panel = null
+        panelParams = null
+    }
 
     private fun label(value: String, size: Float, bold: Boolean) = TextView(service).apply {
-        text = value; textSize = size; setTextColor(Color.WHITE); gravity = Gravity.CENTER_VERTICAL
+        text = value
+        textSize = size
+        setTextColor(Color.WHITE)
+        gravity = Gravity.CENTER_VERTICAL
         if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
     }
 
-    private fun weightedButtonParams() = LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) }
-    private fun rounded(color: Int, radius: Float) = GradientDrawable().apply { setColor(color); cornerRadius = radius }
+    private fun weightedButtonParams() = LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+        setMargins(dp(2), dp(2), dp(2), dp(2))
+    }
+
+    private fun rounded(color: Int, radius: Float) = GradientDrawable().apply {
+        setColor(color)
+        cornerRadius = radius
+    }
+
     private fun dp(value: Int): Int = (value * service.resources.displayMetrics.density + 0.5f).toInt()
 
     companion object {
         private const val TAG_STATUS = "status"
-        private const val TAG_CREATE = "create"
+        private const val TAG_ACTIONS = "actions"
+        private const val TAG_CREATE_DEFAULT = "create_default"
+        private const val TAG_CREATE_GENERAL = "create_general"
+        private const val TAG_CREATE_DEDICATED = "create_dedicated"
     }
 }
